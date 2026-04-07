@@ -193,6 +193,9 @@ Execute the following commands from the `build` directory created during compila
 
 # Benchmark online phase for Asterisk MPC.
 ./../asterisk_online.sh 100 10
+# 可选：为 Asterisk online 统计增加网络仿真时间估计
+./benchmarks/asterisk_online --localhost -n 3 -p $PID -g 1 -d 100 -r 1 \
+  --sim-latency-ms 2 --sim-bandwidth-mbps 50 --sim-rounds-per-depth 2
 
 # Benchmark offline phase for Asterisk MPC.
 ./../asterisk_offline.sh 100 10

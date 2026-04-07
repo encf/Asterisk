@@ -56,3 +56,16 @@ wait
   - Asterisk2.0: one batched-open interactive round per multiplicative depth (`100` rounds here).
   - Asterisk (current implementation path): two aggregation exchanges per depth for multiplication values,
     i.e. about `2 * depth = 200` interaction rounds in this test shape.
+
+## Simulated network run (latency=2ms, bandwidth=50Mbps)
+
+Command parameters:
+- Asterisk2.0: `--sim-latency-ms 2 --sim-bandwidth-mbps 50`
+- Asterisk online baseline: `--sim-latency-ms 2 --sim-bandwidth-mbps 50 --sim-rounds-per-depth 2`
+
+Observed averages (n=3 computing parties, g=1, d=100):
+- Asterisk2.0 online raw time: `870.121991 ms`
+- Asterisk2.0 online bytes: `400`
+- Asterisk online raw time: `6.678695 ms`
+- Asterisk online simulated time: `406.764029 ms`
+- Asterisk online bytes: `533.33`

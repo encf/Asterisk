@@ -92,6 +92,9 @@ void benchmark(const bpo::variables_map& opts) {
     auto seed = opts["seed"].as<size_t>();
     auto repeat = opts["repeat"].as<size_t>();
     auto port = opts["port"].as<int>();
+    auto sim_latency_ms = opts["sim-latency-ms"].as<double>();
+    auto sim_bandwidth_mbps = opts["sim-bandwidth-mbps"].as<double>();
+    auto sim_rounds_per_depth = opts["sim-rounds-per-depth"].as<size_t>();
 
     std::shared_ptr<io::NetIOMP> network = nullptr;
     if (opts["localhost"].as<bool>()) {
@@ -125,7 +128,10 @@ void benchmark(const bpo::variables_map& opts) {
                                 {"security_param", security_param},
                                 {"threads", threads},
                                 {"seed", seed},
-                                {"repeat", repeat}};
+                                {"repeat", repeat},
+                                {"sim_latency_ms", sim_latency_ms},
+                                {"sim_bandwidth_mbps", sim_bandwidth_mbps},
+                                {"sim_rounds_per_depth", sim_rounds_per_depth}};
     output_data["benchmarks"] = json::array();
 
     std::cout << "--- Details ---\n";
@@ -188,6 +194,18 @@ void benchmark(const bpo::variables_map& opts) {
         std::cout << "--- Repetition " << r + 1 << " ---\n";
         std::cout << "time: " << rbench["time"] << " ms\n";
         std::cout << "sent: " << bytes_sent << " bytes\n";
+        if (sim_latency_ms > 0 || sim_bandwidth_mbps > 0) {
+            double sim_ms = rbench["time"].get<double>();
+            if (sim_latency_ms > 0) {
+                sim_ms += static_cast<double>(depth * sim_rounds_per_depth) * sim_latency_ms;
+            }
+            if (sim_bandwidth_mbps > 0) {
+                sim_ms += (static_cast<double>(bytes_sent) * 8.0 / (sim_bandwidth_mbps * 1e6)) * 1000.0;
+            }
+            output_data["benchmarks"].back()["time_simulated"] = sim_ms;
+            output_data["benchmarks"].back()["simulated_rounds"] = depth * sim_rounds_per_depth;
+            std::cout << "time_simulated: " << sim_ms << " ms\n";
+        }
 
         std::cout << std::endl;
     }
@@ -218,6 +236,9 @@ bpo::options_description programOptions() {
         ("seed", bpo::value<size_t>()->default_value(200), "Value of the random seed.")
         ("net-config", bpo::value<std::string>(), "Path to JSON file containing network details of all parties.")
         ("localhost", bpo::bool_switch(), "All parties are on same machine.")
+        ("sim-latency-ms", bpo::value<double>()->default_value(0.0), "Simulated per-round latency in milliseconds.")
+        ("sim-bandwidth-mbps", bpo::value<double>()->default_value(0.0), "Simulated bandwidth cap in Mbps (<=0 disables).")
+        ("sim-rounds-per-depth", bpo::value<size_t>()->default_value(2), "Assumed online communication rounds per multiplicative depth.")
         ("port", bpo::value<int>()->default_value(10000), "Base port for networking.")
         ("output,o", bpo::value<std::string>(), "File to save benchmarks.")
         ("repeat,r", bpo::value<size_t>()->default_value(1), "Number of times to run benchmarks.");
