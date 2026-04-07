@@ -28,6 +28,10 @@ enum class SecurityModel {
 
 struct ProtocolConfig {
   SecurityModel security_model{SecurityModel::kSemiHonest};
+  // Simulated network latency per communication step in milliseconds.
+  double sim_latency_ms{0.0};
+  // Simulated bandwidth cap in megabits per second (<=0 disables).
+  double sim_bandwidth_mbps{0.0};
   // TODO(malicious): move pairwise/shared-key generation to Asterisk-style
   // key management (see asterisk::OfflineEvaluator::keyGen) when adding
   // maliciously secure preprocessing.
@@ -52,6 +56,8 @@ class Protocol {
 
   std::vector<OpenPair> openPairsToComputingParties(
       const std::vector<OpenPair>& local_pairs) const;
+  void maybeSimulateLatency() const;
+  void maybeSimulateBandwidth(size_t bytes) const;
 
   int nP_;
   int id_;

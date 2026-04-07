@@ -8,8 +8,12 @@ Environment:
 
 ## Commands
 ```sh
+# Optional network simulation in code path:
+#   --sim-latency-ms 2 --sim-bandwidth-mbps 50
 for pid in 0 1 2 3; do
-  ./benchmarks/asterisk2_mpc --localhost -n 3 -p "$pid" -g 1 -d 100 -r 1 --security-model semi-honest -o /tmp/asterisk2_chain100_p"$pid".json &
+  ./benchmarks/asterisk2_mpc --localhost -n 3 -p "$pid" -g 1 -d 100 -r 1 \
+    --security-model semi-honest --sim-latency-ms 0 --sim-bandwidth-mbps 0 \
+    -o /tmp/asterisk2_chain100_p"$pid".json &
 done
 wait
 

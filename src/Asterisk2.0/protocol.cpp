@@ -1,7 +1,9 @@
 #include "protocol.h"
 
+#include <chrono>
 #include <random>
 #include <stdexcept>
+#include <thread>
 
 namespace asterisk2 {
 
@@ -86,6 +88,8 @@ std::vector<TripleShare> Protocol::offline() {
       Field bn = b - sum_b;
       Field cn = c - sum_c;
       Field pack[3] = {an, bn, cn};
+      maybeSimulateLatency();
+      maybeSimulateBandwidth(3 * common::utils::FIELDSIZE);
       network_->send(nP_ - 1, pack, 3);
     }
     network_->flush();
@@ -99,6 +103,7 @@ std::vector<TripleShare> Protocol::offline() {
   if (id_ == nP_ - 1) {
     for (size_t g = 0; g < mul_gates.size(); ++g) {
       Field pack[3];
+      maybeSimulateLatency();
       network_->recv(helper_id_, pack, 3);
       triples[g].a = pack[0];
       triples[g].b = pack[1];
@@ -124,6 +129,8 @@ std::vector<Protocol::OpenPair> Protocol::openPairsToComputingParties(
 
   for (int p = 0; p < helper_id_; ++p) {
     if (p != id_) {
+      maybeSimulateLatency();
+      maybeSimulateBandwidth(send_buf.size() * common::utils::FIELDSIZE);
       network_->send(p, send_buf.data(), send_buf.size());
     }
   }
@@ -135,6 +142,7 @@ std::vector<Protocol::OpenPair> Protocol::openPairsToComputingParties(
     if (p == id_) {
       continue;
     }
+    maybeSimulateLatency();
     network_->recv(p, recv_buf.data(), recv_buf.size());
     for (size_t i = 0; i < gates; ++i) {
       sums[i].d += recv_buf[2 * i];
@@ -143,6 +151,25 @@ std::vector<Protocol::OpenPair> Protocol::openPairsToComputingParties(
   }
 
   return sums;
+}
+
+void Protocol::maybeSimulateLatency() const {
+  if (config_.sim_latency_ms > 0) {
+    std::this_thread::sleep_for(std::chrono::duration<double, std::milli>(
+        config_.sim_latency_ms));
+  }
+}
+
+void Protocol::maybeSimulateBandwidth(size_t bytes) const {
+  if (config_.sim_bandwidth_mbps <= 0 || bytes == 0) {
+    return;
+  }
+  // seconds = bits / (megabits_per_sec * 1e6)
+  const double bits = static_cast<double>(bytes) * 8.0;
+  const double seconds = bits / (config_.sim_bandwidth_mbps * 1e6);
+  if (seconds > 0) {
+    std::this_thread::sleep_for(std::chrono::duration<double>(seconds));
+  }
 }
 
 std::vector<Field> Protocol::online(
