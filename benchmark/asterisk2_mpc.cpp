@@ -1,0 +1,147 @@
+#include <io/netmp.h>
+#include <utils/circuit.h>
+
+#include <algorithm>
+#include <boost/program_options.hpp>
+#include <iostream>
+#include <memory>
+
+#include "utils.h"
+#include "Asterisk2.0/protocol.h"
+
+using common::utils::Field;
+using json = nlohmann::json;
+namespace bpo = boost::program_options;
+
+common::utils::Circuit<Field> generateCircuit(size_t gates_per_level, size_t depth) {
+  common::utils::Circuit<Field> circ;
+
+  std::vector<common::utils::wire_t> level_inputs(gates_per_level);
+  std::generate(level_inputs.begin(), level_inputs.end(),
+                [&]() { return circ.newInputWire(); });
+
+  for (size_t d = 0; d < depth; ++d) {
+    std::vector<common::utils::wire_t> level_outputs(gates_per_level);
+    for (size_t i = 0; i < gates_per_level - 1; ++i) {
+      level_outputs[i] = circ.addGate(common::utils::GateType::kMul,
+                                      level_inputs[i], level_inputs[i + 1]);
+    }
+    level_outputs[gates_per_level - 1] =
+        circ.addGate(common::utils::GateType::kMul,
+                     level_inputs[gates_per_level - 1], level_inputs[0]);
+    level_inputs = std::move(level_outputs);
+  }
+
+  for (auto i : level_inputs) {
+    circ.setAsOutput(i);
+  }
+
+  return circ;
+}
+
+void benchmark(const bpo::variables_map& opts) {
+  auto gates_per_level = opts["gates-per-level"].as<size_t>();
+  auto depth = opts["depth"].as<size_t>();
+  auto nP = opts["num-parties"].as<size_t>();
+  auto pid = opts["pid"].as<size_t>();
+  auto seed = opts["seed"].as<size_t>();
+  auto repeat = opts["repeat"].as<size_t>();
+  auto port = opts["port"].as<int>();
+
+  std::shared_ptr<io::NetIOMP> network = nullptr;
+  if (opts["localhost"].as<bool>()) {
+    network = std::make_shared<io::NetIOMP>(pid, nP + 1, port, nullptr, true);
+  } else {
+    throw std::runtime_error("Asterisk2.0 benchmark currently supports localhost only");
+  }
+
+  auto circ = generateCircuit(gates_per_level, depth).orderGatesByLevel();
+
+  std::unordered_map<common::utils::wire_t, Field> inputs;
+  if (pid < nP) {
+    for (const auto& g : circ.gates_by_level[0]) {
+      if (g->type == common::utils::GateType::kInp) {
+        inputs[g->out] = (pid == 0) ? Field(5) : Field(0);
+      }
+    }
+  }
+
+  json output_data;
+  output_data["details"] = {{"gates_per_level", gates_per_level},
+                            {"depth", depth},
+                            {"num-parties", nP},
+                            {"pid", pid},
+                            {"seed", seed},
+                            {"repeat", repeat}};
+  output_data["benchmarks"] = json::array();
+
+  for (size_t r = 0; r < repeat; ++r) {
+    asterisk2::Protocol proto(nP, pid, network, circ, static_cast<int>(seed));
+
+    network->sync();
+    StatsPoint start(*network);
+    auto triples = proto.offline();
+    if (pid < nP) {
+      (void)proto.online(inputs, triples);
+    }
+    StatsPoint end(*network);
+
+    auto rbench = end - start;
+    output_data["benchmarks"].push_back(rbench);
+  }
+
+  if (opts.count("output") != 0) {
+    saveJson(output_data, opts["output"].as<std::string>());
+  }
+}
+
+bpo::options_description programOptions() {
+  bpo::options_description desc("Asterisk2.0 half-honest Beaver benchmark options");
+  desc.add_options()
+      ("gates-per-level,g", bpo::value<size_t>()->required(), "Number of gates at each level.")
+      ("depth,d", bpo::value<size_t>()->required(), "Multiplicative depth of circuit.")
+      ("num-parties,n", bpo::value<size_t>()->required(), "Number of computing parties.")
+      ("pid,p", bpo::value<size_t>()->required(), "Party ID.")
+      ("seed", bpo::value<size_t>()->default_value(200), "Value of the random seed.")
+      ("localhost", bpo::bool_switch(), "All parties are on same machine.")
+      ("port", bpo::value<int>()->default_value(10000), "Base port for networking.")
+      ("output,o", bpo::value<std::string>(), "File to save benchmarks.")
+      ("repeat,r", bpo::value<size_t>()->default_value(1), "Number of repetitions.");
+  return desc;
+}
+
+int main(int argc, char* argv[]) {
+  ZZ_p::init(conv<ZZ>("17816577890427308801"));
+
+  auto prog_opts(programOptions());
+  bpo::options_description cmdline("Benchmark Asterisk2.0 half-honest multiplication protocol.");
+  cmdline.add(prog_opts);
+  cmdline.add_options()("help,h", "produce help message");
+
+  bpo::variables_map opts;
+  bpo::store(bpo::command_line_parser(argc, argv).options(cmdline).run(), opts);
+
+  if (opts.count("help") != 0) {
+    std::cout << cmdline << std::endl;
+    return 0;
+  }
+
+  try {
+    bpo::notify(opts);
+    if (!opts["localhost"].as<bool>()) {
+      throw std::runtime_error("Expected --localhost");
+    }
+  } catch (const std::exception& ex) {
+    std::cerr << ex.what() << std::endl;
+    return 1;
+  }
+
+  try {
+    benchmark(opts);
+  } catch (const std::exception& ex) {
+    std::cerr << ex.what() << "\nFatal error" << std::endl;
+    return 1;
+  }
+
+  return 0;
+}

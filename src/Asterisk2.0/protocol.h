@@ -1,0 +1,47 @@
+#pragma once
+
+#include <memory>
+#include <unordered_map>
+#include <vector>
+
+#include "../io/netmp.h"
+#include "../utils/circuit.h"
+#include "../utils/types.h"
+
+namespace asterisk2 {
+
+using common::utils::Field;
+using common::utils::FIn2Gate;
+using common::utils::LevelOrderedCircuit;
+using common::utils::wire_t;
+
+struct TripleShare {
+  Field a;
+  Field b;
+  Field c;
+};
+
+class Protocol {
+ public:
+  Protocol(int nP, int id, std::shared_ptr<io::NetIOMP> network,
+           LevelOrderedCircuit circ, int seed = 200);
+
+  std::vector<TripleShare> offline();
+
+  std::vector<Field> online(const std::unordered_map<wire_t, Field>& inputs,
+                            const std::vector<TripleShare>& triples);
+
+ private:
+  Field evalMulGate(const FIn2Gate& gate, const TripleShare& t);
+  Field openToComputingParties(const Field& share);
+
+  int nP_;
+  int id_;
+  int helper_id_;
+  int seed_;
+  std::shared_ptr<io::NetIOMP> network_;
+  LevelOrderedCircuit circ_;
+  std::vector<Field> wire_share_;
+};
+
+}  // namespace asterisk2
