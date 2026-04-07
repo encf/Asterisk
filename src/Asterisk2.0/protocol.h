@@ -45,8 +45,13 @@ class Protocol {
                             const std::vector<TripleShare>& triples);
 
  private:
-  Field evalMulGate(const FIn2Gate& gate, const TripleShare& t);
-  Field openToComputingParties(const Field& share);
+  struct OpenPair {
+    Field d;
+    Field e;
+  };
+
+  std::vector<OpenPair> openPairsToComputingParties(
+      const std::vector<OpenPair>& local_pairs) const;
 
   int nP_;
   int id_;

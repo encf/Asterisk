@@ -25,9 +25,9 @@ wait
 ```
 
 ## Results (ms / bytes / comm-count)
-- Asterisk2.0 computing parties average
-  - offline: `0.495635 ms`
-  - online: `14.938681 ms`
+- Asterisk2.0 computing parties average (after batched-open optimization)
+  - offline: `0.423747 ms`
+  - online: `7.051593 ms`
   - offline bytes: `0`
   - online bytes: `400`
   - offline comm-count: `0`
@@ -43,5 +43,9 @@ wait
   - online bytes: `533.33`
 
 ## Quick takeaways
-- For this setup, Asterisk2.0 has lower offline latency for computing parties, but higher online latency.
-- Asterisk2.0 online communication count/bytes are higher in this implementation due to opening `d,e` per multiplication via all-to-all exchange.
+- Compared with the previous unbatched implementation (`online ~= 14.94 ms`),
+  batched-open reduces Asterisk2.0 online time by about 2.1x in this setup.
+- For this setup, Asterisk2.0 has lower offline latency for computing parties,
+  while online is now much closer to Asterisk baseline (`7.05 ms` vs `5.92 ms`).
+- Asterisk2.0 online communication count/bytes are still high in message-count terms
+  due to all-to-all `d,e` opening among computing parties.

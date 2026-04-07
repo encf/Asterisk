@@ -109,44 +109,40 @@ std::vector<TripleShare> Protocol::offline() {
   return triples;
 }
 
-Field Protocol::openToComputingParties(const Field& share) {
+std::vector<Protocol::OpenPair> Protocol::openPairsToComputingParties(
+    const std::vector<OpenPair>& local_pairs) const {
   if (id_ >= helper_id_) {
-    return Field(0);
+    return {};
+  }
+
+  const size_t gates = local_pairs.size();
+  std::vector<Field> send_buf(gates * 2);
+  for (size_t i = 0; i < gates; ++i) {
+    send_buf[2 * i] = local_pairs[i].d;
+    send_buf[2 * i + 1] = local_pairs[i].e;
   }
 
   for (int p = 0; p < helper_id_; ++p) {
     if (p != id_) {
-      network_->send(p, &share, 1);
+      network_->send(p, send_buf.data(), send_buf.size());
     }
   }
   network_->flush();
 
-  Field sum = share;
+  std::vector<OpenPair> sums = local_pairs;
+  std::vector<Field> recv_buf(gates * 2);
   for (int p = 0; p < helper_id_; ++p) {
-    if (p != id_) {
-      Field tmp;
-      network_->recv(p, &tmp, 1);
-      sum += tmp;
+    if (p == id_) {
+      continue;
+    }
+    network_->recv(p, recv_buf.data(), recv_buf.size());
+    for (size_t i = 0; i < gates; ++i) {
+      sums[i].d += recv_buf[2 * i];
+      sums[i].e += recv_buf[2 * i + 1];
     }
   }
-  return sum;
-}
 
-Field Protocol::evalMulGate(const FIn2Gate& gate, const TripleShare& t) {
-  Field x = wire_share_[gate.in1];
-  Field y = wire_share_[gate.in2];
-
-  Field d_share = x - t.a;
-  Field e_share = y - t.b;
-
-  Field d = openToComputingParties(d_share);
-  Field e = openToComputingParties(e_share);
-
-  Field out = e * t.a + d * t.b + t.c;
-  if (id_ == 0) {
-    out += d * e;
-  }
-  return out;
+  return sums;
 }
 
 std::vector<Field> Protocol::online(
@@ -163,6 +159,9 @@ std::vector<Field> Protocol::online(
 
   size_t mul_idx = 0;
   for (const auto& level : circ_.gates_by_level) {
+    std::vector<const FIn2Gate*> mul_gates;
+    mul_gates.reserve(level.size());
+
     for (const auto& gate : level) {
       switch (gate->type) {
         case common::utils::GateType::kInp: {
@@ -171,27 +170,48 @@ std::vector<Field> Protocol::online(
           break;
         }
         case common::utils::GateType::kAdd: {
-          auto g = std::dynamic_pointer_cast<FIn2Gate>(gate);
+          auto* g = static_cast<FIn2Gate*>(gate.get());
           wire_share_[g->out] = wire_share_[g->in1] + wire_share_[g->in2];
           break;
         }
         case common::utils::GateType::kSub: {
-          auto g = std::dynamic_pointer_cast<FIn2Gate>(gate);
+          auto* g = static_cast<FIn2Gate*>(gate.get());
           wire_share_[g->out] = wire_share_[g->in1] - wire_share_[g->in2];
           break;
         }
         case common::utils::GateType::kMul: {
-          auto g = std::dynamic_pointer_cast<FIn2Gate>(gate);
-          if (mul_idx >= triples.size()) {
-            throw std::runtime_error("Insufficient Beaver triples in online phase");
-          }
-          wire_share_[g->out] = evalMulGate(*g, triples[mul_idx]);
-          ++mul_idx;
+          auto* g = static_cast<FIn2Gate*>(gate.get());
+          mul_gates.push_back(g);
           break;
         }
         default:
           throw std::runtime_error("Asterisk2.0 benchmark currently supports Inp/Add/Sub/Mul only");
       }
+    }
+
+    if (!mul_gates.empty()) {
+      std::vector<OpenPair> local_pairs(mul_gates.size());
+      for (size_t i = 0; i < mul_gates.size(); ++i) {
+        if (mul_idx + i >= triples.size()) {
+          throw std::runtime_error("Insufficient Beaver triples in online phase");
+        }
+        const auto* g = mul_gates[i];
+        const auto& t = triples[mul_idx + i];
+        local_pairs[i].d = wire_share_[g->in1] - t.a;
+        local_pairs[i].e = wire_share_[g->in2] - t.b;
+      }
+
+      auto opened = openPairsToComputingParties(local_pairs);
+      for (size_t i = 0; i < mul_gates.size(); ++i) {
+        const auto* g = mul_gates[i];
+        const auto& t = triples[mul_idx + i];
+        Field out = opened[i].e * t.a + opened[i].d * t.b + t.c;
+        if (id_ == 0) {
+          out += opened[i].d * opened[i].e;
+        }
+        wire_share_[g->out] = out;
+      }
+      mul_idx += mul_gates.size();
     }
   }
 

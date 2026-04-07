@@ -173,4 +173,7 @@ wait
 - `offline_bytes`, `online_bytes`
 - `offline_comm_count`, `online_comm_count`
 
+当前实现已在在线阶段做按层 batched-open（把该层所有乘法门的 `d/e`
+打包后一次发送/接收）以降低 RTT 开销。
+
 本仓库内一次实际跑数结果可见：`docs_asterisk2_benchmark.md`。
