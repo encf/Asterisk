@@ -64,7 +64,7 @@ Command parameters:
 - Asterisk online baseline: `--sim-latency-ms 2 --sim-bandwidth-mbps 50 --sim-rounds-per-depth 2`
 
 Observed averages (n=3 computing parties, g=1, d=100):
-- Asterisk2.0 online raw time: `870.121991 ms`
+- Asterisk2.0 online raw time: `448.591495 ms`
 - Asterisk2.0 online bytes: `400`
 - Asterisk online raw time: `6.678695 ms`
 - Asterisk online simulated time: `406.764029 ms`

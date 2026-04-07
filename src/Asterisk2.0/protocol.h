@@ -56,6 +56,7 @@ class Protocol {
 
   std::vector<OpenPair> openPairsToComputingParties(
       const std::vector<OpenPair>& local_pairs) const;
+  void maybeSimulateStep(size_t aggregate_bytes) const;
   void maybeSimulateLatency() const;
   void maybeSimulateBandwidth(size_t bytes) const;
 

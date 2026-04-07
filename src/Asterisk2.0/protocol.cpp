@@ -88,8 +88,7 @@ std::vector<TripleShare> Protocol::offline() {
       Field bn = b - sum_b;
       Field cn = c - sum_c;
       Field pack[3] = {an, bn, cn};
-      maybeSimulateLatency();
-      maybeSimulateBandwidth(3 * common::utils::FIELDSIZE);
+      maybeSimulateStep(3 * common::utils::FIELDSIZE);
       network_->send(nP_ - 1, pack, 3);
     }
     network_->flush();
@@ -103,7 +102,7 @@ std::vector<TripleShare> Protocol::offline() {
   if (id_ == nP_ - 1) {
     for (size_t g = 0; g < mul_gates.size(); ++g) {
       Field pack[3];
-      maybeSimulateLatency();
+      maybeSimulateStep(3 * common::utils::FIELDSIZE);
       network_->recv(helper_id_, pack, 3);
       triples[g].a = pack[0];
       triples[g].b = pack[1];
@@ -127,10 +126,10 @@ std::vector<Protocol::OpenPair> Protocol::openPairsToComputingParties(
     send_buf[2 * i + 1] = local_pairs[i].e;
   }
 
+  const size_t peers = static_cast<size_t>(helper_id_ - 1);
+  maybeSimulateStep(send_buf.size() * common::utils::FIELDSIZE * peers);
   for (int p = 0; p < helper_id_; ++p) {
     if (p != id_) {
-      maybeSimulateLatency();
-      maybeSimulateBandwidth(send_buf.size() * common::utils::FIELDSIZE);
       network_->send(p, send_buf.data(), send_buf.size());
     }
   }
@@ -138,11 +137,11 @@ std::vector<Protocol::OpenPair> Protocol::openPairsToComputingParties(
 
   std::vector<OpenPair> sums = local_pairs;
   std::vector<Field> recv_buf(gates * 2);
+  maybeSimulateStep(recv_buf.size() * common::utils::FIELDSIZE * peers);
   for (int p = 0; p < helper_id_; ++p) {
     if (p == id_) {
       continue;
     }
-    maybeSimulateLatency();
     network_->recv(p, recv_buf.data(), recv_buf.size());
     for (size_t i = 0; i < gates; ++i) {
       sums[i].d += recv_buf[2 * i];
@@ -151,6 +150,11 @@ std::vector<Protocol::OpenPair> Protocol::openPairsToComputingParties(
   }
 
   return sums;
+}
+
+void Protocol::maybeSimulateStep(size_t aggregate_bytes) const {
+  maybeSimulateLatency();
+  maybeSimulateBandwidth(aggregate_bytes);
 }
 
 void Protocol::maybeSimulateLatency() const {

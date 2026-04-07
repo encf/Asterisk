@@ -246,5 +246,6 @@ wait
 
 若你无法使用 `tc/netem`（例如容器缺少 `NET_ADMIN` 权限），可直接使用
 `--sim-latency-ms` 和 `--sim-bandwidth-mbps` 在代码层做网络开销仿真。
+当前仿真模型按通信步骤(step)估算：`step_time = 传播延迟(一次) + 该步骤总传输字节/带宽`。
 
 本仓库内一次实际跑数结果可见：`docs_asterisk2_benchmark.md`。
