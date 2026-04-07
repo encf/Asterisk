@@ -46,6 +46,35 @@ cmake -DCMAKE_BUILD_TYPE=Release ..
 make <target>
 ```
 
+### Ubuntu one-click dependency install
+On Ubuntu, you can install all required dependencies (including `emp-tool`) with:
+
+```sh
+./scripts/install_deps_ubuntu.sh
+```
+
+Then compile:
+
+```sh
+mkdir -p build && cd build
+cmake -DCMAKE_BUILD_TYPE=Release ..
+make -j"$(nproc)" tests benchmarks
+```
+
+### Example: 10 sequential multiplications (MPC)
+This repo can express "10 sequential multiplications" as a circuit with:
+- depth = `10`
+- multiplication gates per depth = `1`
+
+After building benchmarks, run:
+
+```sh
+./mpc_10_chain_mul.sh 3
+```
+
+This starts party IDs `0..3` locally and stores logs under:
+`./run_logs/chain_mul_10/`.
+
 ## Usage
 A short description of the compiled programs is given below.
 All of them provide detailed usage description on using the `--help` option.
