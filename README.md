@@ -230,7 +230,10 @@ wait
 `asterisk2_mpc` 输出中包含以下关键字段便于对比：
 - `offline.time`, `online.time`
 - `offline_bytes`, `online_bytes`
-- `offline_comm_count`, `online_comm_count`
+- `offline_comm_count`
+- `online_comm_rounds`（在线交互轮次，按 multiplicative depth 统计）
+- `online_send_count`（在线 send 次数，`online_comm_rounds * (n-1)`）
+- `online_comm_count`（兼容旧字段，当前等于 `online_comm_rounds`）
 
 当前实现已在在线阶段做按层 batched-open（把该层所有乘法门的 `d/e`
 打包后一次发送/接收）以降低 RTT 开销。

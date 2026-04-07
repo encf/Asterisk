@@ -64,6 +64,19 @@ void benchmark(const bpo::variables_map& opts) {
   }
 
   auto circ = generateCircuit(gates_per_level, depth).orderGatesByLevel();
+  size_t mul_depths = 0;
+  for (const auto& level : circ.gates_by_level) {
+    bool has_mul = false;
+    for (const auto& gate : level) {
+      if (gate->type == common::utils::GateType::kMul) {
+        has_mul = true;
+        break;
+      }
+    }
+    if (has_mul) {
+      ++mul_depths;
+    }
+  }
 
   std::unordered_map<common::utils::wire_t, Field> inputs;
   if (pid < nP) {
@@ -113,13 +126,14 @@ void benchmark(const bpo::variables_map& opts) {
       online_bytes += val.get<int64_t>();
     }
 
-    // Communication count is estimated at protocol message-layer:
-    // offline: helper sends one triple tuple per multiplication gate to Pn.
-    // online: each multiplication opens d and e with all-to-all broadcast.
+    // Communication counters:
+    // - offline_comm_count: helper sends one triple tuple per multiplication gate to Pn.
+    // - online_comm_rounds: batched-open does one interactive round per multiplicative depth.
+    // - online_send_count: per-round each party sends to (nP-1) peers.
     size_t mul_gates = gates_per_level * depth;
     size_t offline_comm_count = (pid == nP ? mul_gates : 0);
-    size_t online_comm_count =
-        (pid < nP ? mul_gates * 2 * (nP - 1) : 0);
+    size_t online_comm_rounds = (pid < nP ? mul_depths : 0);
+    size_t online_send_count = (pid < nP ? mul_depths * (nP - 1) : 0);
 
     output_data["benchmarks"].push_back({
         {"offline", offline_bench},
@@ -127,7 +141,10 @@ void benchmark(const bpo::variables_map& opts) {
         {"offline_bytes", offline_bytes},
         {"online_bytes", online_bytes},
         {"offline_comm_count", offline_comm_count},
-        {"online_comm_count", online_comm_count},
+        {"online_comm_rounds", online_comm_rounds},
+        {"online_send_count", online_send_count},
+        // keep online_comm_count for compatibility; now it denotes rounds.
+        {"online_comm_count", online_comm_rounds},
     });
   }
 

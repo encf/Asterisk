@@ -31,7 +31,8 @@ wait
   - offline bytes: `0`
   - online bytes: `400`
   - offline comm-count: `0`
-  - online comm-count: `400`
+  - online comm-rounds: `100`
+  - online send-count: `200`
 - Asterisk2.0 helper party
   - offline: `0.745918 ms`
   - offline bytes: `300`
@@ -47,5 +48,7 @@ wait
   batched-open reduces Asterisk2.0 online time by about 2.1x in this setup.
 - For this setup, Asterisk2.0 has lower offline latency for computing parties,
   while online is now much closer to Asterisk baseline (`7.05 ms` vs `5.92 ms`).
-- Asterisk2.0 online communication count/bytes are still high in message-count terms
-  due to all-to-all `d,e` opening among computing parties.
+- Multiplication-round view:
+  - Asterisk2.0: one batched-open interactive round per multiplicative depth (`100` rounds here).
+  - Asterisk (current implementation path): two aggregation exchanges per depth for multiplication values,
+    i.e. about `2 * depth = 200` interaction rounds in this test shape.
