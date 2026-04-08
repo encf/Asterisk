@@ -89,8 +89,9 @@ std::vector<TripleShare> Protocol::offline() {
       Field bn = b - sum_b;
       Field cn = c - sum_c;
       Field pack[3] = {an, bn, cn};
-      maybeSimulateStep(3 * common::utils::FIELDSIZE);
-      network_->send(nP_ - 1, pack, 3);
+      constexpr size_t kTripleElements = 3;
+      maybeSimulateStep(kTripleElements * common::utils::FIELDSIZE);
+      network_->send(nP_ - 1, pack, kTripleElements * common::utils::FIELDSIZE);
     }
     network_->flush();
     return triples;
@@ -103,8 +104,9 @@ std::vector<TripleShare> Protocol::offline() {
   if (id_ == nP_ - 1) {
     for (size_t g = 0; g < mul_gates.size(); ++g) {
       Field pack[3];
-      maybeSimulateStep(3 * common::utils::FIELDSIZE);
-      network_->recv(helper_id_, pack, 3);
+      constexpr size_t kTripleElements = 3;
+      maybeSimulateStep(kTripleElements * common::utils::FIELDSIZE);
+      network_->recv(helper_id_, pack, kTripleElements * common::utils::FIELDSIZE);
       triples[g].a = pack[0];
       triples[g].b = pack[1];
       triples[g].c = pack[2];
@@ -191,7 +193,7 @@ std::vector<Protocol::OpenPair> Protocol::openPairsToComputingParties(
   } else {
     for (int p = 0; p < helper_id_; ++p) {
       if (p != id_) {
-        network_->send(p, send_buf.data(), send_buf.size());
+        network_->send(p, send_buf.data(), send_buf.size() * common::utils::FIELDSIZE);
       }
     }
     network_->flush();
@@ -203,7 +205,7 @@ std::vector<Protocol::OpenPair> Protocol::openPairsToComputingParties(
       if (p == id_) {
         continue;
       }
-      network_->recv(p, recv_buf.data(), recv_buf.size());
+      network_->recv(p, recv_buf.data(), recv_buf.size() * common::utils::FIELDSIZE);
       for (size_t i = 0; i < gates; ++i) {
         sums[i].d += recv_buf[2 * i];
         sums[i].e += recv_buf[2 * i + 1];

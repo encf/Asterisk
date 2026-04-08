@@ -40,6 +40,9 @@ that reconstructed outputs match the expected chain-multiplication value with:
 python3 scripts/verify_asterisk2_mul.py --depth 10 --out-dir /tmp/a2_mul_verify
 ```
 
+Expected output after this fix:
+- `match=True`
+
 Validation rule used by the script:
 - benchmark inputs are fixed as party-0=`5`, others=`0` for every input wire;
 - clear input per wire is therefore `5`;
