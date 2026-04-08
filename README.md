@@ -3,6 +3,12 @@
 This directory contains the implementation of the Asterisk fair protocol.
 The protocol is implemented in C++17 and [CMake](https://cmake.org/) is used as the build system.
 
+Field modulus is unified to:
+
+```text
+p = 2^64 - 59 = 18446744073709551557
+```
+
 ## 🚀 从零开始跑通（Ubuntu 小白版）
 
 > 下面按“复制即可执行”的顺序写好，默认你在 Ubuntu 22.04/24.04。
@@ -239,6 +245,16 @@ done
 wait
 # 一键重建输出并校验（期望值按 5^(2^d) mod p 计算）
 python3 scripts/verify_asterisk2_mul.py --depth 10 --out-dir /tmp/a2_mul_verify
+
+# 可选：对在线输出继续执行 Asterisk2.0 算术域概率截断（Trunc-SH）
+# 例：移除 m=8 个小数位，ell_x=40，统计裕量 s=8
+for pid in 0 1 2 3; do
+  ./benchmarks/asterisk2_mpc --localhost -n 3 -p "$pid" -g 1 -d 10 -r 1 \
+    --security-model semi-honest --dump-output-shares \
+    --trunc-frac-bits 8 --trunc-lx 40 --trunc-slack 8 \
+    -o /tmp/a2_trunc_check_p"$pid".json &
+done
+wait
 
 # Asterisk baseline: offline + online split
 for pid in 0 1 2 3; do

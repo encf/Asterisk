@@ -5,6 +5,7 @@ Environment:
 - circuit: `g=1`, `d=100` (100 chain multiplications)
 - repeat: `1`
 - security model: `semi-honest`
+- field modulus: `p = 2^64 - 59 = 18446744073709551557`
 
 ## Commands
 ```sh
@@ -42,6 +43,18 @@ python3 scripts/verify_asterisk2_mul.py --depth 10 --out-dir /tmp/a2_mul_verify
 
 Expected output after this fix:
 - `match=True`
+
+## Probabilistic truncation (Trunc-SH) in Asterisk2.0
+
+`asterisk2_mpc` now supports arithmetic-domain probabilistic truncation after the
+online phase:
+
+- `--trunc-frac-bits m` (enable truncation, remove `m` fractional bits)
+- `--trunc-lx ell_x`
+- `--trunc-slack s`
+
+When enabled together with `--dump-output-shares`, JSON includes:
+- `local_trunc_output_shares`
 
 Validation rule used by the script:
 - benchmark inputs are fixed as party-0=`5`, others=`0` for every input wire;

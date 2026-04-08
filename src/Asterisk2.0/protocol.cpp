@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <limits>
 #include <random>
 #include <stdexcept>
 #include <thread>
@@ -21,6 +22,24 @@ std::mt19937_64 partyHelperRng(int seed, int party_id, size_t gate_idx) {
 
 std::mt19937_64 helperTripleRng(int seed, size_t gate_idx) {
   return std::mt19937_64(static_cast<uint64_t>(seed) * 7919ULL + gate_idx);
+}
+
+std::mt19937_64 helperTruncRng(int seed, size_t idx) {
+  return std::mt19937_64(static_cast<uint64_t>(seed) * 104729ULL + idx);
+}
+
+uint64_t pow2Bound(size_t bits) {
+  if (bits >= 64) {
+    throw std::runtime_error("pow2Bound supports bit lengths < 64");
+  }
+  return (1ULL << bits);
+}
+
+Field randomFieldBounded(std::mt19937_64& rng, uint64_t bound) {
+  if (bound == 0) {
+    return Field(0);
+  }
+  return NTL::conv<Field>(NTL::to_ZZ(static_cast<unsigned long>(rng() % bound)));
 }
 }  // namespace
 
@@ -216,6 +235,32 @@ std::vector<Protocol::OpenPair> Protocol::openPairsToComputingParties(
   }
 }
 
+Field Protocol::openToComputingParties(const Field& local_share) const {
+  if (id_ >= helper_id_) {
+    return Field(0);
+  }
+
+  maybeSimulateStep(common::utils::FIELDSIZE * static_cast<size_t>(helper_id_ - 1));
+  for (int p = 0; p < helper_id_; ++p) {
+    if (p != id_) {
+      network_->send(p, &local_share, common::utils::FIELDSIZE);
+    }
+  }
+  network_->flush();
+
+  Field opened = local_share;
+  Field recv_val = Field(0);
+  maybeSimulateStep(common::utils::FIELDSIZE * static_cast<size_t>(helper_id_ - 1));
+  for (int p = 0; p < helper_id_; ++p) {
+    if (p == id_) {
+      continue;
+    }
+    network_->recv(p, &recv_val, common::utils::FIELDSIZE);
+    opened += recv_val;
+  }
+  return opened;
+}
+
 void Protocol::maybeSimulateStep(size_t aggregate_bytes) const {
   maybeSimulateLatency();
   maybeSimulateBandwidth(aggregate_bytes);
@@ -316,6 +361,77 @@ std::vector<Field> Protocol::online(
     outputs.push_back(wire_share_[wid]);
   }
   return outputs;
+}
+
+std::vector<Field> Protocol::probabilisticTruncate(
+    const std::vector<Field>& x_shares, size_t ell_x, size_t m, size_t s) {
+  if (id_ > helper_id_) {
+    return {};
+  }
+  if (m == 0 || m >= ell_x) {
+    throw std::runtime_error("probabilisticTruncate requires 0 < m < ell_x");
+  }
+  if (ell_x + s + 1 >= 64) {
+    throw std::runtime_error("probabilisticTruncate requires ell_x + s + 1 < 64");
+  }
+  const uint64_t bound_r = pow2Bound(ell_x - m + s);
+  const uint64_t bound_r0 = pow2Bound(m);
+  const uint64_t two_pow_m = pow2Bound(m);
+  const uint64_t two_pow_lx_minus_1 = pow2Bound(ell_x - 1);
+  const Field lambda_m = inv(NTL::conv<Field>(NTL::to_ZZ(two_pow_m)));
+
+  std::vector<Field> out(x_shares.size(), Field(0));
+  if (id_ == helper_id_) {
+    for (size_t idx = 0; idx < x_shares.size(); ++idx) {
+      auto hrg = helperTruncRng(seed_, idx);
+      Field r = randomFieldBounded(hrg, bound_r);
+      Field r0 = randomFieldBounded(hrg, bound_r0);
+      Field sum_r = Field(0);
+      Field sum_r0 = Field(0);
+      for (int i = 0; i <= nP_ - 2; ++i) {
+        auto prg = partyHelperRng(seed_ + 17, i, idx);
+        auto ri = randomFieldBounded(prg, bound_r);
+        auto r0i = randomFieldBounded(prg, bound_r0);
+        sum_r += ri;
+        sum_r0 += r0i;
+      }
+      Field pack[2] = {r - sum_r, r0 - sum_r0};
+      maybeSimulateStep(2 * common::utils::FIELDSIZE);
+      network_->send(nP_ - 1, pack, 2 * common::utils::FIELDSIZE);
+    }
+    network_->flush();
+    return out;
+  }
+
+  std::vector<Field> r_share(x_shares.size(), Field(0));
+  std::vector<Field> r0_share(x_shares.size(), Field(0));
+  if (id_ <= nP_ - 2) {
+    for (size_t idx = 0; idx < x_shares.size(); ++idx) {
+      auto prg = partyHelperRng(seed_ + 17, id_, idx);
+      r_share[idx] = randomFieldBounded(prg, bound_r);
+      r0_share[idx] = randomFieldBounded(prg, bound_r0);
+    }
+  } else if (id_ == nP_ - 1) {
+    for (size_t idx = 0; idx < x_shares.size(); ++idx) {
+      Field pack[2];
+      maybeSimulateStep(2 * common::utils::FIELDSIZE);
+      network_->recv(helper_id_, pack, 2 * common::utils::FIELDSIZE);
+      r_share[idx] = pack[0];
+      r0_share[idx] = pack[1];
+    }
+  }
+
+  for (size_t idx = 0; idx < x_shares.size(); ++idx) {
+    Field z_i = x_shares[idx] + ((id_ == 0) ? NTL::conv<Field>(NTL::to_ZZ(two_pow_lx_minus_1))
+                                            : Field(0));
+    Field c_i = z_i + NTL::conv<Field>(NTL::to_ZZ(two_pow_m)) * r_share[idx] + r0_share[idx];
+    Field c = openToComputingParties(c_i);
+    uint64_t c_u64 = NTL::conv<uint64_t>(NTL::rep(c));
+    uint64_t c0 = c_u64 & (two_pow_m - 1);
+    Field d_i = ((id_ == 0) ? NTL::conv<Field>(NTL::to_ZZ(c0)) : Field(0)) - r0_share[idx];
+    out[idx] = lambda_m * (x_shares[idx] - d_i);
+  }
+  return out;
 }
 
 }  // namespace asterisk2

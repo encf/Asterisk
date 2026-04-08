@@ -55,7 +55,7 @@ bool saveJson(const nlohmann::json& data, const std::string& fpath) {
 }
 
 void initNTL(size_t num_threads) {
-  NTL::ZZ_p::init(NTL::conv<NTL::ZZ>("18446744073709551616"));
+  NTL::ZZ_p::init(NTL::conv<NTL::ZZ>(common::utils::kFieldPrimeDecimal));
   NTL::ZZ_pX P(NTL::INIT_MONO, 47);
   NTL::SetCoeff(P, 5);
   NTL::SetCoeff(P, 0);

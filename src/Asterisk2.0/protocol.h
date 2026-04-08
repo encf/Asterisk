@@ -49,6 +49,9 @@ class Protocol {
 
   std::vector<Field> online(const std::unordered_map<wire_t, Field>& inputs,
                             const std::vector<TripleShare>& triples);
+  std::vector<Field> probabilisticTruncate(const std::vector<Field>& x_shares,
+                                           size_t ell_x, size_t m,
+                                           size_t s);
 
  private:
   struct OpenPair {
@@ -58,6 +61,7 @@ class Protocol {
 
   std::vector<OpenPair> openPairsToComputingParties(
       const std::vector<OpenPair>& local_pairs) const;
+  Field openToComputingParties(const Field& local_share) const;
   void maybeSimulateStep(size_t aggregate_bytes) const;
   void maybeSimulateLatency() const;
   void maybeSimulateBandwidth(size_t bytes) const;

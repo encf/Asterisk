@@ -5,7 +5,7 @@ import pathlib
 import subprocess
 import sys
 
-PRIME = 17816577890427308801
+PRIME = 18446744073709551557
 
 
 def run_cmd(cmd):

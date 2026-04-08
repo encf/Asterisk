@@ -59,6 +59,9 @@ void benchmark(const bpo::variables_map& opts) {
   auto net_model =
       common::utils::resolveNetworkCostModel(net_preset, bandwidth_bps, latency_ms);
   auto dump_output_shares = opts["dump-output-shares"].as<bool>();
+  auto trunc_frac_bits = opts["trunc-frac-bits"].as<size_t>();
+  auto trunc_lx = opts["trunc-lx"].as<size_t>();
+  auto trunc_slack = opts["trunc-slack"].as<size_t>();
 
   asterisk2::SecurityModel security_model = asterisk2::SecurityModel::kSemiHonest;
   if (security_model_str == "malicious") {
@@ -130,8 +133,19 @@ void benchmark(const bpo::variables_map& opts) {
     network->sync();
     StatsPoint online_start(*network);
     std::vector<Field> local_outputs;
+    std::vector<Field> local_trunc_outputs;
     if (pid < nP) {
       local_outputs = proto.online(inputs, triples);
+    }
+    if (trunc_frac_bits > 0) {
+      if (pid < nP) {
+        local_trunc_outputs =
+            proto.probabilisticTruncate(local_outputs, trunc_lx, trunc_frac_bits, trunc_slack);
+      } else {
+        std::vector<Field> helper_placeholder(circ.outputs.size(), Field(0));
+        (void)proto.probabilisticTruncate(helper_placeholder, trunc_lx, trunc_frac_bits,
+                                          trunc_slack);
+      }
     }
     StatsPoint online_end(*network);
 
@@ -195,6 +209,13 @@ void benchmark(const bpo::variables_map& opts) {
         shares.push_back(NTL::conv<uint64_t>(NTL::rep(val)));
       }
       row["local_output_shares"] = shares;
+      if (trunc_frac_bits > 0) {
+        json trunc_shares = json::array();
+        for (const auto& val : local_trunc_outputs) {
+          trunc_shares.push_back(NTL::conv<uint64_t>(NTL::rep(val)));
+        }
+        row["local_trunc_output_shares"] = trunc_shares;
+      }
     }
     output_data["benchmarks"].push_back(std::move(row));
   }
@@ -229,6 +250,12 @@ bpo::options_description programOptions() {
        "Communication-cost model latency in ms (overrides preset when >0).")
       ("dump-output-shares", bpo::bool_switch()->default_value(false),
        "Dump local output shares in benchmark JSON for correctness validation.")
+      ("trunc-frac-bits", bpo::value<size_t>()->default_value(0),
+       "Enable Asterisk2.0 probabilistic truncation with this many fractional bits.")
+      ("trunc-lx", bpo::value<size_t>()->default_value(40),
+       "Bit-length parameter ell_x for probabilistic truncation.")
+      ("trunc-slack", bpo::value<size_t>()->default_value(8),
+       "Statistical slack parameter s for probabilistic truncation.")
       ("port", bpo::value<int>()->default_value(10000), "Base port for networking.")
       ("output,o", bpo::value<std::string>(), "File to save benchmarks.")
       ("repeat,r", bpo::value<size_t>()->default_value(1), "Number of repetitions.");
@@ -236,7 +263,7 @@ bpo::options_description programOptions() {
 }
 
 int main(int argc, char* argv[]) {
-  ZZ_p::init(conv<ZZ>("17816577890427308801"));
+  ZZ_p::init(conv<ZZ>(common::utils::kFieldPrimeDecimal));
 
   auto prog_opts(programOptions());
   bpo::options_description cmdline("Benchmark Asterisk2.0 half-honest multiplication protocol.");
