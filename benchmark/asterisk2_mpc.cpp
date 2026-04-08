@@ -138,7 +138,7 @@ void benchmark(const bpo::variables_map& opts) {
     // Communication counters:
     // - offline_comm_count: helper sends one triple tuple per multiplication gate to Pn.
     // - online_comm_rounds: batched-open does one interactive round per multiplicative depth.
-    // - online_send_count: if parallel_send=true, count one logical send per round;
+    // - online_send_count: if parallel_send=true, count one logical round-send;
     //   else count per-peer sends.
     size_t mul_gates = gates_per_level * depth;
     size_t offline_comm_count = (pid == nP ? mul_gates : 0);
@@ -182,7 +182,7 @@ bpo::options_description programOptions() {
       ("sim-bandwidth-mbps", bpo::value<double>()->default_value(0.0),
        "Simulated bandwidth cap in Mbps (<=0 disables).")
       ("parallel-send", bpo::bool_switch()->default_value(false),
-       "Use parallel-link accounting for online_send_count (one logical send per round).")
+       "Enable parallel peer send/recv for sufficiently wide levels; report one logical send per round.")
       ("port", bpo::value<int>()->default_value(10000), "Base port for networking.")
       ("output,o", bpo::value<std::string>(), "File to save benchmarks.")
       ("repeat,r", bpo::value<size_t>()->default_value(1), "Number of repetitions.");

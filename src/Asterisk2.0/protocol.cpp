@@ -1,6 +1,7 @@
 #include "protocol.h"
 
 #include <chrono>
+#include <cstdint>
 #include <random>
 #include <stdexcept>
 #include <thread>
@@ -128,28 +129,89 @@ std::vector<Protocol::OpenPair> Protocol::openPairsToComputingParties(
 
   const size_t peers = static_cast<size_t>(helper_id_ - 1);
   maybeSimulateStep(send_buf.size() * common::utils::FIELDSIZE * peers);
-  for (int p = 0; p < helper_id_; ++p) {
-    if (p != id_) {
-      network_->send(p, send_buf.data(), send_buf.size());
+  const bool use_parallel_io = config_.parallel_send && peers >= 3 && gates >= 64;
+  if (use_parallel_io) {
+    const size_t serialized_bytes = send_buf.size() * common::utils::FIELDSIZE;
+    std::vector<uint8_t> send_serialized(serialized_bytes);
+    for (size_t i = 0; i < send_buf.size(); ++i) {
+      NTL::BytesFromZZ(send_serialized.data() + i * common::utils::FIELDSIZE,
+                       NTL::conv<NTL::ZZ>(send_buf[i]), common::utils::FIELDSIZE);
     }
-  }
-  network_->flush();
 
-  std::vector<OpenPair> sums = local_pairs;
-  std::vector<Field> recv_buf(gates * 2);
-  maybeSimulateStep(recv_buf.size() * common::utils::FIELDSIZE * peers);
-  for (int p = 0; p < helper_id_; ++p) {
-    if (p == id_) {
-      continue;
+    std::vector<int> peer_ids;
+    peer_ids.reserve(peers);
+    for (int p = 0; p < helper_id_; ++p) {
+      if (p != id_) {
+        peer_ids.push_back(p);
+      }
     }
-    network_->recv(p, recv_buf.data(), recv_buf.size());
-    for (size_t i = 0; i < gates; ++i) {
-      sums[i].d += recv_buf[2 * i];
-      sums[i].e += recv_buf[2 * i + 1];
-    }
-  }
 
-  return sums;
+    std::vector<std::thread> send_threads;
+    send_threads.reserve(peer_ids.size());
+    for (int peer : peer_ids) {
+      send_threads.emplace_back([&, peer]() {
+        auto* channel = network_->getSendChannel(peer);
+        channel->send_data(send_serialized.data(), send_serialized.size());
+        channel->flush();
+      });
+    }
+    for (auto& th : send_threads) {
+      th.join();
+    }
+
+    std::vector<OpenPair> sums = local_pairs;
+    maybeSimulateStep(send_buf.size() * common::utils::FIELDSIZE * peers);
+
+    std::vector<std::vector<uint8_t>> recv_serialized(
+        peer_ids.size(), std::vector<uint8_t>(serialized_bytes));
+    std::vector<std::thread> recv_threads;
+    recv_threads.reserve(peer_ids.size());
+    for (size_t idx = 0; idx < peer_ids.size(); ++idx) {
+      recv_threads.emplace_back([&, idx]() {
+        auto* channel = network_->getRecvChannel(peer_ids[idx]);
+        channel->recv_data(recv_serialized[idx].data(), recv_serialized[idx].size());
+      });
+    }
+    for (auto& th : recv_threads) {
+      th.join();
+    }
+
+    for (const auto& peer_buf : recv_serialized) {
+      for (size_t i = 0; i < gates; ++i) {
+        const auto d = NTL::ZZFromBytes(peer_buf.data() + (2 * i) * common::utils::FIELDSIZE,
+                                        common::utils::FIELDSIZE);
+        const auto e = NTL::ZZFromBytes(peer_buf.data() + (2 * i + 1) * common::utils::FIELDSIZE,
+                                        common::utils::FIELDSIZE);
+        sums[i].d += NTL::conv<Field>(d);
+        sums[i].e += NTL::conv<Field>(e);
+      }
+    }
+
+    return sums;
+  } else {
+    for (int p = 0; p < helper_id_; ++p) {
+      if (p != id_) {
+        network_->send(p, send_buf.data(), send_buf.size());
+      }
+    }
+    network_->flush();
+
+    std::vector<OpenPair> sums = local_pairs;
+    std::vector<Field> recv_buf(gates * 2);
+    maybeSimulateStep(recv_buf.size() * common::utils::FIELDSIZE * peers);
+    for (int p = 0; p < helper_id_; ++p) {
+      if (p == id_) {
+        continue;
+      }
+      network_->recv(p, recv_buf.data(), recv_buf.size());
+      for (size_t i = 0; i < gates; ++i) {
+        sums[i].d += recv_buf[2 * i];
+        sums[i].e += recv_buf[2 * i + 1];
+      }
+    }
+
+    return sums;
+  }
 }
 
 void Protocol::maybeSimulateStep(size_t aggregate_bytes) const {

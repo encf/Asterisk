@@ -69,4 +69,7 @@ Observed averages (n=3 computing parties, g=1, d=100):
 - Asterisk online raw time: `6.678695 ms`
 - Asterisk online simulated time: `406.764029 ms`
 - Asterisk online bytes: `533.33`
-- With `--parallel-send`, Asterisk2.0 `online_send_count` is reported with parallel-link accounting (one logical send per round).
+- With `--parallel-send`, Asterisk2.0 uses parallel peer send/recv during batched-open, and
+  `online_send_count` is reported with parallel-link accounting (one logical send per round).
+  For narrow levels (e.g., `g=1`), runtime automatically falls back to serial I/O to avoid
+  thread-management overhead.

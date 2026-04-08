@@ -181,7 +181,7 @@ Execute the following commands from the `build` directory created during compila
 # 可选：代码层仿真网络（每个通信步骤增加延迟/带宽上限）
 ./benchmarks/asterisk2_mpc -p $PID --localhost -g 100 -d 10 -n 5 \
   --sim-latency-ms 2 --sim-bandwidth-mbps 50
-# 可选：按并行链路口径统计发送次数（使逻辑发送次数≈通信轮次）
+# 可选：开启在线阶段并行对端发送/接收，并按并行链路口径统计发送次数
 ./benchmarks/asterisk2_mpc -p $PID --localhost -g 100 -d 10 -n 5 --parallel-send
 
 # The `asterisk_mpc` script in the repository root can be used to run the programs 
@@ -241,7 +241,9 @@ wait
 - `offline_comm_count`
 - `online_comm_rounds`（在线交互轮次，按 multiplicative depth 统计）
 - `online_send_count`（在线 send 次数，`online_comm_rounds * (n-1)`）
-- 若开启 `--parallel-send`，`online_send_count` 统计为每轮 1 次逻辑发送。
+- 若开启 `--parallel-send`，在线 batched-open 将并行对端发送/接收，
+  且 `online_send_count` 统计为每轮 1 次逻辑发送。
+  对很窄的层（例如 `g=1`）会自动退化为串行路径以避免线程开销。
 - `online_comm_count`（兼容旧字段，当前等于 `online_comm_rounds`）
 
 当前实现已在在线阶段做按层 batched-open（把该层所有乘法门的 `d/e`
