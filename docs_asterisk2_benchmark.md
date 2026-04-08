@@ -2,6 +2,8 @@
 
 > Note: the protocol implementation has been refactored into explicit offline/online APIs
 > (`mul_*`, `trunc_*`, `compare_*`) so preprocessing and online rounds can be benchmarked separately.
+> In Asterisk2.0 open rounds, the network simulation now follows a full-duplex overlap model:
+> send/recv in the same open round are accounted once as one round latency + bandwidth cost.
 
 Environment:
 - parties: `n=3` computing + `1` helper

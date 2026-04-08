@@ -700,11 +700,11 @@ std::vector<Protocol::OpenPair> Protocol::openPairsToComputingParties(
   }
 
   const auto peers = computingPeerIdsExcludingSelf();
+  // Full-duplex model: peer send/recv overlap in one open round.
   maybeSimulateStep(send_buf.size() * common::utils::FIELDSIZE * peers.size());
   sendFieldVectorToPeers(peers, send_buf);
 
   std::vector<OpenPair> sums = local_pairs;
-  maybeSimulateStep(send_buf.size() * common::utils::FIELDSIZE * peers.size());
   auto recv_all = recvFieldVectorsFromPeers(peers, send_buf.size());
   for (const auto& recv_buf : recv_all) {
     for (size_t i = 0; i < local_pairs.size(); ++i) {
@@ -722,11 +722,11 @@ Field Protocol::openToComputingParties(const Field& local_share) const {
 
   const auto peers = computingPeerIdsExcludingSelf();
   std::vector<Field> local_vec = {local_share};
+  // Full-duplex model: this open is one round (send+recv overlap).
   maybeSimulateStep(common::utils::FIELDSIZE * peers.size());
   sendFieldVectorToPeers(peers, local_vec);
 
   Field opened = local_share;
-  maybeSimulateStep(common::utils::FIELDSIZE * peers.size());
   auto recv_all = recvFieldVectorsFromPeers(peers, 1);
   for (const auto& recv_vec : recv_all) {
     opened += recv_vec[0];
@@ -745,10 +745,10 @@ std::vector<Field> Protocol::openVectorToComputingParties(const std::vector<Fiel
   const auto peers = computingPeerIdsExcludingSelf();
   std::vector<Field> opened = local_vec;
   const size_t bytes = local_vec.size() * common::utils::FIELDSIZE;
+  // Full-duplex model: this batched open is one round (send+recv overlap).
   maybeSimulateStep(bytes * peers.size());
   sendFieldVectorToPeers(peers, local_vec);
 
-  maybeSimulateStep(bytes * peers.size());
   auto recv_all = recvFieldVectorsFromPeers(peers, local_vec.size());
   for (const auto& recv_buf : recv_all) {
     for (size_t i = 0; i < local_vec.size(); ++i) {
