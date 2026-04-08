@@ -137,7 +137,13 @@ void benchmark(const bpo::variables_map& opts) {
     if (pid < nP) {
       local_outputs = proto.online(inputs, triples);
     }
+    StatsPoint online_end(*network);
+
+    json trunc_bench = {{"time", 0.0}, {"communication", json::array()}};
+    size_t trunc_bytes = 0;
     if (trunc_frac_bits > 0) {
+      network->sync();
+      StatsPoint trunc_start(*network);
       if (pid < nP) {
         local_trunc_outputs =
             proto.probabilisticTruncate(local_outputs, trunc_lx, trunc_frac_bits, trunc_slack);
@@ -146,8 +152,12 @@ void benchmark(const bpo::variables_map& opts) {
         (void)proto.probabilisticTruncate(helper_placeholder, trunc_lx, trunc_frac_bits,
                                           trunc_slack);
       }
+      StatsPoint trunc_end(*network);
+      trunc_bench = trunc_end - trunc_start;
+      for (const auto& val : trunc_bench["communication"]) {
+        trunc_bytes += val.get<int64_t>();
+      }
     }
-    StatsPoint online_end(*network);
 
     auto offline_bench = offline_end - offline_start;
     auto online_bench = online_end - online_start;
@@ -193,8 +203,10 @@ void benchmark(const bpo::variables_map& opts) {
     json row = {
         {"offline", offline_bench},
         {"online", online_bench},
+        {"truncation", trunc_bench},
         {"offline_bytes", offline_bytes},
         {"online_bytes", online_bytes},
+        {"truncation_bytes", trunc_bytes},
         {"offline_comm_count", offline_comm_count},
         {"online_comm_rounds", online_comm_rounds},
         {"online_send_count", online_send_count},

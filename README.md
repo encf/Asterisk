@@ -256,6 +256,10 @@ for pid in 0 1 2 3; do
 done
 wait
 
+# 说明：乘法 online 与 truncation 统计已分开输出
+# - online.* / online_bytes: 仅乘法在线阶段
+# - truncation.* / truncation_bytes: 仅截断阶段
+
 # Asterisk baseline: offline + online split
 for pid in 0 1 2 3; do
   ./benchmarks/asterisk_offline --localhost -n 3 -p "$pid" -g 1 -d 100 -r 1 -o asterisk_offline_chain100_p"$pid".json &

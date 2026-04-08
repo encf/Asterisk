@@ -55,6 +55,8 @@ online phase:
 
 When enabled together with `--dump-output-shares`, JSON includes:
 - `local_trunc_output_shares`
+- `truncation` and `truncation_bytes` (truncation-only timing/communication);
+  `online` and `online_bytes` remain multiplication-only.
 
 Validation rule used by the script:
 - benchmark inputs are fixed as party-0=`5`, others=`0` for every input wire;
