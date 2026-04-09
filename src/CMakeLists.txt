@@ -2,6 +2,7 @@ add_library(Asterisk
     utils/circuit.cpp
     utils/types.cpp
     utils/helpers.cpp
+    Asterisk2.0/key_manager.cpp
     Asterisk2.0/mac_setup.cpp
     Asterisk2.0/protocol.cpp
     asterisk/sharing.cpp

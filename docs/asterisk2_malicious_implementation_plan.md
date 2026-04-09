@@ -11,6 +11,7 @@
 - ✅ 下一阶段已启动：`mul_online_malicious` 增加 key-material 一致性校验（计算方打开 `[Δ]` 与 `[Δ^{-1}]` 并校验 `Δ * Δ^{-1} = 1`）。
 - ✅ 新增输出一致性校验回路：helper 从计算方输出 share 重构结果并回传，计算方与本地 batched-open 重构结果比对。
 - ✅ `Pi_MACSetup-DH` 已按独立模块实现：`src/Asterisk2.0/mac_setup.h/.cpp`，并新增 `asterisk2_mac_setup_dh_test` 覆盖核心不变量。
+- ✅ 已实现显式会话级密钥管理模块：`src/Asterisk2.0/key_manager.h/.cpp`，`Pi_MACSetup-DH` 改为从 key manager 读取 helper<->party pairwise keys。
 - ⏳ Ver-DH、deferred batch verify 与 fair release 尚未接入（后续阶段实现）。
 
 ## 0. 当前基线（必须先确认）

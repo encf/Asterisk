@@ -5,6 +5,8 @@
 
 #include <emp-tool/emp-tool.h>
 
+#include "key_manager.h"
+
 namespace asterisk2 {
 namespace {
 using emp::block;
@@ -22,6 +24,14 @@ emp::PRG makePrg(int seed, int party_id, uint64_t idx, MacPrgLabel label) {
   const uint64_t lo = (static_cast<uint64_t>(static_cast<uint32_t>(seed)) << 32) ^
                       static_cast<uint32_t>(party_id);
   const uint64_t hi = idx ^ static_cast<uint64_t>(label);
+  block key = emp::makeBlock(hi, lo);
+  return emp::PRG(&key, 0);
+}
+
+emp::PRG makePrgFromPairwiseKey(const PairwiseKey& pairwise_key, uint64_t idx,
+                                MacPrgLabel label) {
+  const uint64_t lo = pairwise_key.lo ^ idx;
+  const uint64_t hi = pairwise_key.hi ^ static_cast<uint64_t>(label);
   block key = emp::makeBlock(hi, lo);
   return emp::PRG(&key, 0);
 }
@@ -54,6 +64,7 @@ MacSetupResult runMacSetupDH(int nP, int id, std::shared_ptr<io::NetIOMP> networ
     throw std::runtime_error("Pi_MACSetup-DH received invalid party id");
   }
   const int helper_id = nP;
+  KeyManager key_manager(nP, id, seed);
 
   MacSetupResult out;
 
@@ -67,8 +78,9 @@ MacSetupResult runMacSetupDH(int nP, int id, std::shared_ptr<io::NetIOMP> networ
     Field sum_delta = Field(0);
     Field sum_delta_inv = Field(0);
     for (int i = 0; i <= nP - 2; ++i) {
-      auto delta_prg = makePrg(seed, i, 0, MacPrgLabel::kMacDelta);
-      auto inv_prg = makePrg(seed, i, 0, MacPrgLabel::kMacDeltaInv);
+      auto pairwise_key = key_manager.keyForParty(i);
+      auto delta_prg = makePrgFromPairwiseKey(pairwise_key, 0, MacPrgLabel::kMacDelta);
+      auto inv_prg = makePrgFromPairwiseKey(pairwise_key, 0, MacPrgLabel::kMacDeltaInv);
       sum_delta += prgField(delta_prg);
       sum_delta_inv += prgField(inv_prg);
     }
@@ -89,8 +101,9 @@ MacSetupResult runMacSetupDH(int nP, int id, std::shared_ptr<io::NetIOMP> networ
 
   // 6) Computing parties store local shares only.
   if (id <= nP - 2) {
-    auto delta_prg = makePrg(seed, id, 0, MacPrgLabel::kMacDelta);
-    auto inv_prg = makePrg(seed, id, 0, MacPrgLabel::kMacDeltaInv);
+    auto pairwise_key = key_manager.keyWithHelper();
+    auto delta_prg = makePrgFromPairwiseKey(pairwise_key, 0, MacPrgLabel::kMacDelta);
+    auto inv_prg = makePrgFromPairwiseKey(pairwise_key, 0, MacPrgLabel::kMacDeltaInv);
     out.party.delta_share = prgField(delta_prg);
     out.party.delta_inv_share = prgField(inv_prg);
     out.party.ready = true;
