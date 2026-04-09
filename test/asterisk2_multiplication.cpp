@@ -185,13 +185,13 @@ BOOST_AUTO_TEST_CASE(malicious_mode_mul_roundtrip_smoke) {
 
       auto off = proto.mul_offline();
       network->sync();
-      if (pid == helper) {
-        return Field(0);
-      }
       std::unordered_map<common::utils::wire_t, Field> inputs;
       inputs[w0] = (pid == 0) ? Field(5) : Field(0);
       inputs[w1] = (pid == 0) ? Field(8) : Field(0);
       auto out = proto.mul_online(inputs, off);
+      if (pid == helper) {
+        return Field(0);
+      }
       BOOST_REQUIRE_EQUAL(out.size(), 1);
       return out[0];
     }));

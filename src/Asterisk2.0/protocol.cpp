@@ -369,10 +369,52 @@ std::vector<Field> Protocol::mul_online_semi_honest(
 
 std::vector<Field> Protocol::mul_online_malicious(
     const std::unordered_map<wire_t, Field>& inputs, const MulOfflineData& offline_data) {
-  // Next-phase bootstrap: verify malicious key material shares with helper.
+  // Next-phase bootstrap: verify malicious key material consistency first.
   verifyMaliciousKeyMaterial(offline_data);
-  // Current malicious online still reuses semi-honest arithmetic kernel.
-  return mul_online_semi_honest(inputs, offline_data);
+  // Reuse semi-honest arithmetic kernel for share computation.
+  auto outputs = mul_online_semi_honest(inputs, offline_data);
+
+  const size_t out_len = circ_.outputs.size();
+  if (out_len == 0) {
+    return outputs;
+  }
+  if (id_ == helper_id_) {
+    // Helper reconstructs outputs from computing-party shares and broadcasts
+    // reconstructed values for cross-check by computing parties.
+    std::vector<Field> reconstructed(out_len, Field(0));
+    for (int p = 0; p < helper_id_; ++p) {
+      std::vector<Field> share_vec(out_len, Field(0));
+      maybeSimulateStep(out_len * common::utils::FIELDSIZE);
+      network_->recv(p, share_vec.data(), share_vec.size() * common::utils::FIELDSIZE);
+      for (size_t i = 0; i < out_len; ++i) {
+        reconstructed[i] += share_vec[i];
+      }
+    }
+    for (int p = 0; p < helper_id_; ++p) {
+      maybeSimulateStep(out_len * common::utils::FIELDSIZE);
+      network_->send(p, reconstructed.data(), reconstructed.size() * common::utils::FIELDSIZE);
+    }
+    network_->flush();
+    return {};
+  }
+
+  // Computing parties send their output shares to helper.
+  maybeSimulateStep(out_len * common::utils::FIELDSIZE);
+  network_->send(helper_id_, outputs.data(), outputs.size() * common::utils::FIELDSIZE);
+  network_->flush();
+
+  // Computing parties also reconstruct outputs among themselves and verify they
+  // match helper-side reconstruction.
+  const std::vector<Field> local_reconstructed = openVectorToComputingParties(outputs);
+  std::vector<Field> helper_reconstructed(out_len, Field(0));
+  maybeSimulateStep(out_len * common::utils::FIELDSIZE);
+  network_->recv(helper_id_, helper_reconstructed.data(),
+                 helper_reconstructed.size() * common::utils::FIELDSIZE);
+  if (local_reconstructed != helper_reconstructed) {
+    throw std::runtime_error("malicious output consistency check failed");
+  }
+
+  return outputs;
 }
 
 void Protocol::verifyMaliciousKeyMaterial(const MulOfflineData& offline_data) const {
