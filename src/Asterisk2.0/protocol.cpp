@@ -29,6 +29,10 @@ enum class PrgLabel : uint64_t {
   kCmpShuffle = 0x434d505348554646ULL,
   kCmpBit = 0x434d504249545f5fULL,
   kCmpHelperShare = 0x434d504853484152ULL,
+  kInputOwnerMask = 0x494e504f574e4d53ULL,
+  kInputGlobalMask = 0x494e50474c4d4153ULL,
+  kInputXRShare = 0x494e505852534852ULL,
+  kInputDeltaXRShare = 0x494e504458525348ULL,
 };
 
 emp::PRG makePrg(int seed, int party_id, uint64_t idx, PrgLabel label) {
@@ -382,8 +386,9 @@ std::vector<Field> Protocol::mul_online_malicious(
     const std::unordered_map<wire_t, Field>& inputs, const MulOfflineData& offline_data) {
   // Next-phase bootstrap: verify malicious key material consistency first.
   verifyMaliciousKeyMaterial(offline_data);
+  const auto malicious_input_shares = buildMaliciousInputShares(inputs, offline_data);
   // Reuse semi-honest arithmetic kernel for share computation.
-  auto outputs = mul_online_semi_honest(inputs, offline_data);
+  auto outputs = mul_online_semi_honest(malicious_input_shares, offline_data);
 
   const size_t out_len = circ_.outputs.size();
   if (out_len == 0) {
@@ -426,6 +431,116 @@ std::vector<Field> Protocol::mul_online_malicious(
   }
 
   return outputs;
+}
+
+std::unordered_map<wire_t, Field> Protocol::buildMaliciousInputShares(
+    const std::unordered_map<wire_t, Field>& inputs, const MulOfflineData& offline_data) {
+  std::unordered_map<wire_t, Field> out;
+  if (!offline_data.ready) {
+    throw std::runtime_error("malicious input sharing requires ready MulOfflineData");
+  }
+
+  constexpr int kDefaultInputOwner = 0;
+  if (nP_ < 1) {
+    throw std::runtime_error("malicious input sharing requires at least one computing party");
+  }
+
+  Field helper_delta = Field(0);
+  if (id_ == helper_id_) {
+    auto helper_prg = makePrg(seed_, helper_id_, 0, PrgLabel::kMaliciousDeltaHelper);
+    helper_delta = prgNonZeroField(helper_prg);
+  }
+  Field opened_delta = Field(0);
+  if (id_ < helper_id_) {
+    opened_delta = openToComputingParties(offline_data.delta_share);
+  }
+
+  size_t input_idx = 0;
+  for (const auto& level : circ_.gates_by_level) {
+    for (const auto& gate : level) {
+      if (gate->type != common::utils::GateType::kInp) {
+        continue;
+      }
+      const wire_t w = gate->out;
+
+      if (id_ == helper_id_) {
+        Field x_prime = Field(0);
+        maybeSimulateStep(common::utils::FIELDSIZE);
+        network_->recv(kDefaultInputOwner, &x_prime, common::utils::FIELDSIZE);
+
+        const auto owner_pairwise = key_manager_.keyForParty(kDefaultInputOwner);
+        auto t_prg =
+            makePrgFromPairwiseKey(owner_pairwise, input_idx, PrgLabel::kInputOwnerMask);
+        const Field t = prgField(t_prg);
+        const Field x_plus_r = x_prime - t;
+        const Field delta_x_plus_r = helper_delta * x_plus_r;
+
+        Field sum_x_plus_r = Field(0);
+        Field sum_delta_x_plus_r = Field(0);
+        for (int i = 0; i <= nP_ - 2; ++i) {
+          const auto pi_key = key_manager_.keyForParty(i);
+          auto x_prg = makePrgFromPairwiseKey(pi_key, input_idx, PrgLabel::kInputXRShare);
+          auto dx_prg =
+              makePrgFromPairwiseKey(pi_key, input_idx, PrgLabel::kInputDeltaXRShare);
+          sum_x_plus_r += prgField(x_prg);
+          sum_delta_x_plus_r += prgField(dx_prg);
+        }
+
+        Field pack[2] = {x_plus_r - sum_x_plus_r, delta_x_plus_r - sum_delta_x_plus_r};
+        maybeSimulateStep(2 * common::utils::FIELDSIZE);
+        network_->send(nP_ - 1, pack, 2 * common::utils::FIELDSIZE);
+        network_->flush();
+      } else {
+        const auto kp = key_manager_.computingPartiesKey();
+        auto r_prg = makePrgFromPairwiseKey(kp, input_idx, PrgLabel::kInputGlobalMask);
+        const Field r = prgField(r_prg);
+
+        Field x_plus_r_share = Field(0);
+        Field delta_x_plus_r_share = Field(0);
+        if (id_ <= nP_ - 2) {
+          const auto pairwise = key_manager_.keyWithHelper();
+          auto x_prg =
+              makePrgFromPairwiseKey(pairwise, input_idx, PrgLabel::kInputXRShare);
+          auto dx_prg =
+              makePrgFromPairwiseKey(pairwise, input_idx, PrgLabel::kInputDeltaXRShare);
+          x_plus_r_share = prgField(x_prg);
+          delta_x_plus_r_share = prgField(dx_prg);
+        } else {
+          Field pack[2] = {Field(0), Field(0)};
+          maybeSimulateStep(2 * common::utils::FIELDSIZE);
+          network_->recv(helper_id_, pack, 2 * common::utils::FIELDSIZE);
+          x_plus_r_share = pack[0];
+          delta_x_plus_r_share = pack[1];
+        }
+
+        if (id_ == kDefaultInputOwner) {
+          const auto owner_pairwise = key_manager_.keyWithHelper();
+          auto t_prg =
+              makePrgFromPairwiseKey(owner_pairwise, input_idx, PrgLabel::kInputOwnerMask);
+          const Field t = prgField(t_prg);
+          const auto it = inputs.find(w);
+          const Field x = (it == inputs.end()) ? Field(0) : it->second;
+          const Field x_prime = x + r + t;
+          maybeSimulateStep(common::utils::FIELDSIZE);
+          network_->send(helper_id_, &x_prime, common::utils::FIELDSIZE);
+          network_->flush();
+        }
+
+        const Field x_share = x_plus_r_share - ((id_ == kDefaultInputOwner) ? r : Field(0));
+        const Field delta_x_share = delta_x_plus_r_share - offline_data.delta_share * r;
+        const Field opened_x = openToComputingParties(x_share);
+        const Field opened_delta_x = openToComputingParties(delta_x_share);
+        if (opened_delta_x != opened_delta * opened_x) {
+          throw std::runtime_error("malicious input sharing consistency check failed");
+        }
+        out[w] = x_share;
+      }
+
+      ++input_idx;
+    }
+  }
+
+  return out;
 }
 
 void Protocol::verifyMaliciousKeyMaterial(const MulOfflineData& offline_data) const {
