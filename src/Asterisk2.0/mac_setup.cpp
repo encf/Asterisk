@@ -56,7 +56,8 @@ Field prgNonZeroField(emp::PRG& prg) {
 
 }  // namespace
 
-MacSetupResult runMacSetupDH(int nP, int id, std::shared_ptr<io::NetIOMP> network, int seed) {
+MacSetupResult runMacSetupDH(int nP, int id, std::shared_ptr<io::NetIOMP> network,
+                             const KeyManager& key_manager, int seed) {
   if (nP < 2) {
     throw std::runtime_error("Pi_MACSetup-DH requires at least 2 computing parties");
   }
@@ -64,7 +65,9 @@ MacSetupResult runMacSetupDH(int nP, int id, std::shared_ptr<io::NetIOMP> networ
     throw std::runtime_error("Pi_MACSetup-DH received invalid party id");
   }
   const int helper_id = nP;
-  KeyManager key_manager(nP, id, seed);
+  if (key_manager.helperId() != helper_id || key_manager.id() != id) {
+    throw std::runtime_error("runMacSetupDH received mismatched KeyManager context");
+  }
 
   MacSetupResult out;
 

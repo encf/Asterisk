@@ -40,7 +40,8 @@ BOOST_AUTO_TEST_CASE(mac_setup_dh_invariants_and_visibility) {
       auto net = std::make_shared<io::NetIOMP>(pid, nP + 1, base_port, nullptr, true);
       LocalOut ret;
       ret.is_helper = (pid == helper);
-      ret.out = asterisk2::runMacSetupDH(nP, pid, net, 200);
+      asterisk2::KeyManager km(nP, pid, 200);
+      ret.out = asterisk2::runMacSetupDH(nP, pid, net, km, 200);
       return ret;
     }));
   }

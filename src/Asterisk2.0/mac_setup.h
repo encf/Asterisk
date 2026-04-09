@@ -2,6 +2,7 @@
 
 #include <memory>
 
+#include "key_manager.h"
 #include "../io/netmp.h"
 #include "../utils/types.h"
 
@@ -29,6 +30,6 @@ struct MacSetupResult {
 // Pi_MACSetup-DH(P, P_{n+1})
 // nP: number of computing parties (IDs 0..nP-1), helper ID is nP.
 MacSetupResult runMacSetupDH(int nP, int id, std::shared_ptr<io::NetIOMP> network,
-                             int seed = 200);
+                             const KeyManager& key_manager, int seed = 200);
 
 }  // namespace asterisk2
