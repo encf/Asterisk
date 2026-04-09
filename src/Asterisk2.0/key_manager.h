@@ -27,8 +27,14 @@ class KeyManager {
   bool hasKeyForParty(int party_id) const;
   PairwiseKey keyForParty(int party_id) const;
 
+  // For computing parties only (id < helper_id_): shared key among all
+  // computing parties, used for compare_offline shared mask generation.
+  bool hasComputingPartiesKey() const;
+  PairwiseKey computingPartiesKey() const;
+
  private:
   static PairwiseKey derivePairwiseKey(int seed, int party_id);
+  static PairwiseKey deriveComputingPartiesKey(int seed, int nP);
 
   int nP_;
   int id_;
@@ -36,6 +42,8 @@ class KeyManager {
   std::unordered_map<int, PairwiseKey> helper_side_keys_;
   PairwiseKey party_key_with_helper_{};
   bool party_has_key_{false};
+  PairwiseKey computing_parties_key_{};
+  bool has_computing_parties_key_{false};
 };
 
 }  // namespace asterisk2

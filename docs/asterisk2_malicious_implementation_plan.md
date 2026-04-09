@@ -13,7 +13,7 @@
 - ✅ `Pi_MACSetup-DH` 已按独立模块实现：`src/Asterisk2.0/mac_setup.h/.cpp`，并新增 `asterisk2_mac_setup_dh_test` 覆盖核心不变量。
 - ✅ 已实现显式会话级密钥管理模块：`src/Asterisk2.0/key_manager.h/.cpp`，`Pi_MACSetup-DH` 改为从 key manager 读取 helper<->party pairwise keys。
 - ✅ `runMacSetupDH` 不再在函数内部创建/管理密钥，统一改为由调用方显式传入 `KeyManager`。
-- ✅ semi-honest 离线 share 派生（mul/trunc/compare）已接入 key manager，不再直接用 `(seed, party_id)` 在协议逻辑内拼“隐式密钥”。
+- ✅ semi-honest 离线 share 派生（mul/trunc/compare）已接入 key manager，不再直接用 `(seed, party_id)` 在协议逻辑内拼“隐式密钥”；其中 compare 离线共享掩码改为使用仅计算方共享的 `K_P`。
 - ⏳ Ver-DH、deferred batch verify 与 fair release 尚未接入（后续阶段实现）。
 
 ## 0. 当前基线（必须先确认）

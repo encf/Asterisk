@@ -23,6 +23,8 @@ KeyManager::KeyManager(int nP, int id, int seed)
 
   party_key_with_helper_ = derivePairwiseKey(seed, id_);
   party_has_key_ = true;
+  computing_parties_key_ = deriveComputingPartiesKey(seed, nP_);
+  has_computing_parties_key_ = true;
 }
 
 bool KeyManager::hasKeyWithHelper() const {
@@ -48,11 +50,30 @@ PairwiseKey KeyManager::keyForParty(int party_id) const {
   return it->second;
 }
 
+bool KeyManager::hasComputingPartiesKey() const {
+  return has_computing_parties_key_;
+}
+
+PairwiseKey KeyManager::computingPartiesKey() const {
+  if (!has_computing_parties_key_) {
+    throw std::runtime_error("No computing-parties shared key for this role");
+  }
+  return computing_parties_key_;
+}
+
 PairwiseKey KeyManager::derivePairwiseKey(int seed, int party_id) {
   PairwiseKey k;
   k.lo = (static_cast<uint64_t>(static_cast<uint32_t>(seed)) << 32) ^
          static_cast<uint32_t>(party_id);
   k.hi = 0x4b4d475250414952ULL ^ static_cast<uint64_t>(party_id);
+  return k;
+}
+
+PairwiseKey KeyManager::deriveComputingPartiesKey(int seed, int nP) {
+  PairwiseKey k;
+  k.lo = (static_cast<uint64_t>(static_cast<uint32_t>(seed)) << 32) ^
+         static_cast<uint32_t>(nP);
+  k.hi = 0x4b5f50415254595fULL ^ static_cast<uint64_t>(nP);
   return k;
 }
 

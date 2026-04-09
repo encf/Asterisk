@@ -602,24 +602,31 @@ CompareOfflineData Protocol::compare_offline(size_t lx, size_t s, bool force_t,
   out.trunc_data.ready = true;
 
   out.cmp_data.rho.assign(lx + 2, Field(0));
-  for (size_t i = 0; i < out.cmp_data.rho.size(); ++i) {
-    auto pprg = makePrg(seed_, 0, i + 1, PrgLabel::kCmpMask);
-    out.cmp_data.rho[i] = prgNonZeroField(pprg);
-  }
-
   out.cmp_data.permutation.resize(lx + 2);
   std::iota(out.cmp_data.permutation.begin(), out.cmp_data.permutation.end(), 0);
-  auto shuffle_prg = makePrg(seed_, 0, lx, PrgLabel::kCmpShuffle);
-  for (size_t i = out.cmp_data.permutation.size(); i > 1; --i) {
-    size_t j = static_cast<size_t>(prgUint64(shuffle_prg) % i);
-    std::swap(out.cmp_data.permutation[i - 1], out.cmp_data.permutation[j]);
-  }
+  out.cmp_data.t = false;
 
-  if (force_t) {
-    out.cmp_data.t = forced_t_value;
-  } else {
-    auto t_prg = makePrg(seed_, 0, lx + 1, PrgLabel::kCmpBit);
-    out.cmp_data.t = prgBit(t_prg);
+  // K_P: key shared among computing parties only, used to derive shared compare
+  // randomness in compare_offline.
+  if (id_ < helper_id_) {
+    const auto kp = key_manager_.computingPartiesKey();
+    for (size_t i = 0; i < out.cmp_data.rho.size(); ++i) {
+      auto pprg = makePrgFromPairwiseKey(kp, i + 1, PrgLabel::kCmpMask);
+      out.cmp_data.rho[i] = prgNonZeroField(pprg);
+    }
+
+    auto shuffle_prg = makePrgFromPairwiseKey(kp, lx, PrgLabel::kCmpShuffle);
+    for (size_t i = out.cmp_data.permutation.size(); i > 1; --i) {
+      size_t j = static_cast<size_t>(prgUint64(shuffle_prg) % i);
+      std::swap(out.cmp_data.permutation[i - 1], out.cmp_data.permutation[j]);
+    }
+
+    if (force_t) {
+      out.cmp_data.t = forced_t_value;
+    } else {
+      auto t_prg = makePrgFromPairwiseKey(kp, lx + 1, PrgLabel::kCmpBit);
+      out.cmp_data.t = prgBit(t_prg);
+    }
   }
 
   out.cmp_data.ready = true;
