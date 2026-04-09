@@ -3,6 +3,12 @@
 > 目标：将 `SecurityModel::kMalicious` 从“占位”升级为可运行、可验证、可基准测试的完整流程。  
 > 范围：`src/Asterisk2.0/`、`benchmarks/`、`test/`、`README.md`。
 
+## 实施进度（持续更新）
+
+- ✅ Phase 1 bootstrap 已落地：`mul_offline()` 在 malicious 模式不再直接抛异常，并新增了由 helper 派生的 `Δ`/`Δ^{-1}` 加法分享材料（当前用于后续 Ver-DH 开发的底层数据准备）。
+- ✅ 已新增 malicious 模式乘法冒烟测试：`test/asterisk2_multiplication.cpp` 中 `malicious_mode_mul_roundtrip_smoke`。
+- ⏳ Ver-DH、deferred batch verify 与 fair release 尚未接入（后续阶段实现）。
+
 ## 0. 当前基线（必须先确认）
 
 - 现状：`mul_offline()` 在 malicious 模式直接抛异常，尚未实现恶意协议路径。

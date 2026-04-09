@@ -21,6 +21,8 @@ constexpr uint64_t kPrime64Minus59 = 18446744073709551557ULL;
 enum class PrgLabel : uint64_t {
   kMulShare = 0x4d554c5348415245ULL,
   kMulHelper = 0x4d554c48454c5046ULL,
+  kMaliciousDeltaShare = 0x4d4143444c545348ULL,
+  kMaliciousDeltaHelper = 0x4d4143444c54484cULL,
   kTruncShare = 0x5452554e43534852ULL,
   kTruncHelper = 0x5452554e43484c50ULL,
   kCmpMask = 0x434d504d41534b53ULL,
@@ -170,10 +172,6 @@ std::vector<std::vector<Field>> Protocol::recvFieldVectorsFromPeers(
 }
 
 MulOfflineData Protocol::mul_offline() {
-  if (config_.security_model == SecurityModel::kMalicious) {
-    throw std::runtime_error(
-        "Asterisk2.0 malicious model is not implemented yet; use semi-honest mode");
-  }
   if (nP_ < 2) {
     throw std::runtime_error("Asterisk2.0 requires at least 2 computing parties");
   }
@@ -195,6 +193,11 @@ MulOfflineData Protocol::mul_offline() {
       out.triples[g].a = prgField(prg);
       out.triples[g].b = prgField(prg);
       out.triples[g].c = prgField(prg);
+    }
+    if (config_.security_model == SecurityModel::kMalicious) {
+      auto delta_prg = makePrg(seed_, id_, 0, PrgLabel::kMaliciousDeltaShare);
+      out.delta_share = prgField(delta_prg);
+      out.delta_inv_share = prgField(delta_prg);
     }
     out.ready = true;
     return out;
@@ -221,6 +224,23 @@ MulOfflineData Protocol::mul_offline() {
       maybeSimulateStep(pack.size() * common::utils::FIELDSIZE);
       network_->send(nP_ - 1, pack.data(), pack.size() * common::utils::FIELDSIZE);
     }
+
+    if (config_.security_model == SecurityModel::kMalicious) {
+      auto helper_prg = makePrg(seed_, helper_id_, 0, PrgLabel::kMaliciousDeltaHelper);
+      const Field delta = prgNonZeroField(helper_prg);
+      const Field delta_inv = NTL::inv(delta);
+
+      Field sum_delta = Field(0);
+      Field sum_delta_inv = Field(0);
+      for (int i = 0; i <= nP_ - 2; ++i) {
+        auto pprg = makePrg(seed_, i, 0, PrgLabel::kMaliciousDeltaShare);
+        sum_delta += prgField(pprg);
+        sum_delta_inv += prgField(pprg);
+      }
+      std::vector<Field> pack = {delta - sum_delta, delta_inv - sum_delta_inv};
+      maybeSimulateStep(pack.size() * common::utils::FIELDSIZE);
+      network_->send(nP_ - 1, pack.data(), pack.size() * common::utils::FIELDSIZE);
+    }
     network_->flush();
     out.ready = true;
     return out;
@@ -232,6 +252,13 @@ MulOfflineData Protocol::mul_offline() {
       maybeSimulateStep(3 * common::utils::FIELDSIZE);
       network_->recv(helper_id_, pack, 3 * common::utils::FIELDSIZE);
       out.triples[g] = {pack[0], pack[1], pack[2]};
+    }
+    if (config_.security_model == SecurityModel::kMalicious) {
+      Field pack[2];
+      maybeSimulateStep(2 * common::utils::FIELDSIZE);
+      network_->recv(helper_id_, pack, 2 * common::utils::FIELDSIZE);
+      out.delta_share = pack[0];
+      out.delta_inv_share = pack[1];
     }
   }
   out.ready = true;

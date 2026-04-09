@@ -23,6 +23,10 @@ struct TripleShare {
 
 struct MulOfflineData {
   std::vector<TripleShare> triples;
+  // Malicious-mode bootstrap material (additive shares among computing parties).
+  // In semi-honest mode these remain zero.
+  Field delta_share{Field(0)};
+  Field delta_inv_share{Field(0)};
   bool ready{false};
 };
 

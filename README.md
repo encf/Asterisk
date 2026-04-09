@@ -188,7 +188,7 @@ Execute the following commands from the `build` directory created during compila
 #
 # 该程序需要启动 n+1 个进程：其中 0..n-1 为计算方，n 为 helper。
 ./benchmarks/asterisk2_mpc -p $PID --localhost -g 100 -d 10 -n 5
-# 安全模型参数（目前支持 semi-honest；malicious 预留接口）
+# 安全模型参数（semi-honest 完整可用；malicious 为开发中实验路径）
 ./benchmarks/asterisk2_mpc -p $PID --localhost -g 100 -d 10 -n 5 --security-model semi-honest
 # 可选：代码层仿真网络（每个通信步骤增加延迟/带宽上限）
 ./benchmarks/asterisk2_mpc -p $PID --localhost -g 100 -d 10 -n 5 \
