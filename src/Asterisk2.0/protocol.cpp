@@ -185,6 +185,13 @@ MulOfflineData Protocol::mul_offline() {
     }
   }
 
+  if (config_.security_model == SecurityModel::kMalicious) {
+    return mul_offline_malicious(mul_gates);
+  }
+  return mul_offline_semi_honest(mul_gates);
+}
+
+MulOfflineData Protocol::mul_offline_semi_honest(const std::vector<FIn2Gate>& mul_gates) {
   MulOfflineData out;
   out.triples.resize(mul_gates.size());
   if (id_ <= nP_ - 2) {
@@ -193,11 +200,6 @@ MulOfflineData Protocol::mul_offline() {
       out.triples[g].a = prgField(prg);
       out.triples[g].b = prgField(prg);
       out.triples[g].c = prgField(prg);
-    }
-    if (config_.security_model == SecurityModel::kMalicious) {
-      auto delta_prg = makePrg(seed_, id_, 0, PrgLabel::kMaliciousDeltaShare);
-      out.delta_share = prgField(delta_prg);
-      out.delta_inv_share = prgField(delta_prg);
     }
     out.ready = true;
     return out;
@@ -225,22 +227,6 @@ MulOfflineData Protocol::mul_offline() {
       network_->send(nP_ - 1, pack.data(), pack.size() * common::utils::FIELDSIZE);
     }
 
-    if (config_.security_model == SecurityModel::kMalicious) {
-      auto helper_prg = makePrg(seed_, helper_id_, 0, PrgLabel::kMaliciousDeltaHelper);
-      const Field delta = prgNonZeroField(helper_prg);
-      const Field delta_inv = NTL::inv(delta);
-
-      Field sum_delta = Field(0);
-      Field sum_delta_inv = Field(0);
-      for (int i = 0; i <= nP_ - 2; ++i) {
-        auto pprg = makePrg(seed_, i, 0, PrgLabel::kMaliciousDeltaShare);
-        sum_delta += prgField(pprg);
-        sum_delta_inv += prgField(pprg);
-      }
-      std::vector<Field> pack = {delta - sum_delta, delta_inv - sum_delta_inv};
-      maybeSimulateStep(pack.size() * common::utils::FIELDSIZE);
-      network_->send(nP_ - 1, pack.data(), pack.size() * common::utils::FIELDSIZE);
-    }
     network_->flush();
     out.ready = true;
     return out;
@@ -253,20 +239,61 @@ MulOfflineData Protocol::mul_offline() {
       network_->recv(helper_id_, pack, 3 * common::utils::FIELDSIZE);
       out.triples[g] = {pack[0], pack[1], pack[2]};
     }
-    if (config_.security_model == SecurityModel::kMalicious) {
-      Field pack[2];
-      maybeSimulateStep(2 * common::utils::FIELDSIZE);
-      network_->recv(helper_id_, pack, 2 * common::utils::FIELDSIZE);
-      out.delta_share = pack[0];
-      out.delta_inv_share = pack[1];
-    }
   }
   out.ready = true;
   return out;
 }
 
+MulOfflineData Protocol::mul_offline_malicious(const std::vector<FIn2Gate>& mul_gates) {
+  // Phase-1 malicious bootstrap: keep semi-honest triples, additionally prepare
+  // additive shares of global MAC key material [Δ], [Δ^{-1}] for later Ver-DH.
+  MulOfflineData out = mul_offline_semi_honest(mul_gates);
+  if (id_ <= nP_ - 2) {
+    auto delta_prg = makePrg(seed_, id_, 0, PrgLabel::kMaliciousDeltaShare);
+    out.delta_share = prgField(delta_prg);
+    out.delta_inv_share = prgField(delta_prg);
+    return out;
+  }
+
+  if (id_ == helper_id_) {
+    auto helper_prg = makePrg(seed_, helper_id_, 0, PrgLabel::kMaliciousDeltaHelper);
+    const Field delta = prgNonZeroField(helper_prg);
+    const Field delta_inv = NTL::inv(delta);
+
+    Field sum_delta = Field(0);
+    Field sum_delta_inv = Field(0);
+    for (int i = 0; i <= nP_ - 2; ++i) {
+      auto pprg = makePrg(seed_, i, 0, PrgLabel::kMaliciousDeltaShare);
+      sum_delta += prgField(pprg);
+      sum_delta_inv += prgField(pprg);
+    }
+    std::vector<Field> pack = {delta - sum_delta, delta_inv - sum_delta_inv};
+    maybeSimulateStep(pack.size() * common::utils::FIELDSIZE);
+    network_->send(nP_ - 1, pack.data(), pack.size() * common::utils::FIELDSIZE);
+    network_->flush();
+    return out;
+  }
+
+  if (id_ == nP_ - 1) {
+    Field pack[2];
+    maybeSimulateStep(2 * common::utils::FIELDSIZE);
+    network_->recv(helper_id_, pack, 2 * common::utils::FIELDSIZE);
+    out.delta_share = pack[0];
+    out.delta_inv_share = pack[1];
+  }
+  return out;
+}
+
 std::vector<Field> Protocol::mul_online(const std::unordered_map<wire_t, Field>& inputs,
                                         const MulOfflineData& offline_data) {
+  if (config_.security_model == SecurityModel::kMalicious) {
+    return mul_online_malicious(inputs, offline_data);
+  }
+  return mul_online_semi_honest(inputs, offline_data);
+}
+
+std::vector<Field> Protocol::mul_online_semi_honest(
+    const std::unordered_map<wire_t, Field>& inputs, const MulOfflineData& offline_data) {
   if (!offline_data.ready) {
     throw std::runtime_error("mul_online requires ready MulOfflineData from mul_offline");
   }
@@ -338,6 +365,13 @@ std::vector<Field> Protocol::mul_online(const std::unordered_map<wire_t, Field>&
     outputs.push_back(wire_share_[wid]);
   }
   return outputs;
+}
+
+std::vector<Field> Protocol::mul_online_malicious(
+    const std::unordered_map<wire_t, Field>& inputs, const MulOfflineData& offline_data) {
+  // Phase-1 malicious path intentionally reuses semi-honest online core while
+  // keeping the branch separated for follow-up Ver-DH/deferred-verify logic.
+  return mul_online_semi_honest(inputs, offline_data);
 }
 
 TruncOfflineData Protocol::trunc_offline(size_t batch_size, size_t ell_x, size_t m, size_t s) {

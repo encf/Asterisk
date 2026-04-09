@@ -7,6 +7,7 @@
 
 - ✅ Phase 1 bootstrap 已落地：`mul_offline()` 在 malicious 模式不再直接抛异常，并新增了由 helper 派生的 `Δ`/`Δ^{-1}` 加法分享材料（当前用于后续 Ver-DH 开发的底层数据准备）。
 - ✅ 已新增 malicious 模式乘法冒烟测试：`test/asterisk2_multiplication.cpp` 中 `malicious_mode_mul_roundtrip_smoke`。
+- ✅ semi-honest 与 malicious 乘法路径已在代码层分离（`mul_offline_semi_honest/mul_offline_malicious` 与 `mul_online_semi_honest/mul_online_malicious`）。
 - ⏳ Ver-DH、deferred batch verify 与 fair release 尚未接入（后续阶段实现）。
 
 ## 0. 当前基线（必须先确认）

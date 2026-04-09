@@ -124,6 +124,12 @@ class Protocol {
       const std::vector<OpenPair>& local_pairs) const;
   Field openToComputingParties(const Field& local_share) const;
   std::vector<Field> openVectorToComputingParties(const std::vector<Field>& local_vec) const;
+  MulOfflineData mul_offline_semi_honest(const std::vector<FIn2Gate>& mul_gates);
+  MulOfflineData mul_offline_malicious(const std::vector<FIn2Gate>& mul_gates);
+  std::vector<Field> mul_online_semi_honest(
+      const std::unordered_map<wire_t, Field>& inputs, const MulOfflineData& offline_data);
+  std::vector<Field> mul_online_malicious(
+      const std::unordered_map<wire_t, Field>& inputs, const MulOfflineData& offline_data);
   std::vector<std::vector<Field>> recvFieldVectorsFromPeers(const std::vector<int>& peers,
                                                             size_t len) const;
   void sendFieldVectorToPeers(const std::vector<int>& peers, const std::vector<Field>& data) const;
