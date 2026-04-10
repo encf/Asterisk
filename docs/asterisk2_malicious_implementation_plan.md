@@ -15,6 +15,7 @@
 - ✅ `runMacSetupDH` 不再在函数内部创建/管理密钥，统一改为由调用方显式传入 `KeyManager`。
 - ✅ semi-honest 离线 share 派生（mul/trunc/compare）已接入 key manager，不再直接用 `(seed, party_id)` 在协议逻辑内拼“隐式密钥”；其中 compare 离线共享掩码改为使用仅计算方共享的 `K_P`。
 - ✅ 已实现 malicious 输入认证分享原语（`x' = x + r + t`、helper 侧补足 share、计算方本地去 mask）；一致性检查由测试用例覆盖。
+- ✅ malicious 乘法离线预处理已扩展为“算术三元组 + MAC-layer 辅助 tuple”批量生成：`[a],[b],[ab]` 与 `[a'],[b'],[c'],[a'b'],[a'c'],[b'c'],[a'b'c']`。
 - ⏳ Ver-DH、deferred batch verify 与 fair release 尚未接入（后续阶段实现）。
 
 ## 0. 当前基线（必须先确认）

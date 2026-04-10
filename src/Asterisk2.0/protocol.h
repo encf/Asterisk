@@ -22,8 +22,19 @@ struct TripleShare {
   Field c;
 };
 
+struct MulAuthTupleShare {
+  Field a_prime;
+  Field b_prime;
+  Field c_prime;
+  Field a_prime_b_prime;
+  Field a_prime_c_prime;
+  Field b_prime_c_prime;
+  Field a_prime_b_prime_c_prime;
+};
+
 struct MulOfflineData {
   std::vector<TripleShare> triples;
+  std::vector<MulAuthTupleShare> auth_tuples;
   // Malicious-mode bootstrap material (additive shares among computing parties).
   // In semi-honest mode these remain zero.
   Field delta_share{Field(0)};

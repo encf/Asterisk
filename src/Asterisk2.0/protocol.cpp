@@ -21,6 +21,8 @@ constexpr uint64_t kPrime64Minus59 = 18446744073709551557ULL;
 enum class PrgLabel : uint64_t {
   kMulShare = 0x4d554c5348415245ULL,
   kMulHelper = 0x4d554c48454c5046ULL,
+  kMulMaliciousShare = 0x4d554c4d4c534852ULL,
+  kMulMaliciousHelper = 0x4d554c4d4c484c50ULL,
   kMaliciousDeltaShare = 0x4d4143444c545348ULL,
   kMaliciousDeltaHelper = 0x4d4143444c54484cULL,
   kTruncShare = 0x5452554e43534852ULL,
@@ -258,15 +260,96 @@ MulOfflineData Protocol::mul_offline_semi_honest(const std::vector<FIn2Gate>& mu
 }
 
 MulOfflineData Protocol::mul_offline_malicious(const std::vector<FIn2Gate>& mul_gates) {
-  // Phase-1 malicious bootstrap: keep semi-honest triples, additionally prepare
-  // additive shares of global MAC key material [Δ], [Δ^{-1}] for later Ver-DH.
-  MulOfflineData out = mul_offline_semi_honest(mul_gates);
+  MulOfflineData out;
+  out.triples.resize(mul_gates.size());
+  out.auth_tuples.resize(mul_gates.size());
+  if (id_ <= nP_ - 2) {
+    const auto pairwise = key_manager_.keyWithHelper();
+    for (size_t g = 0; g < mul_gates.size(); ++g) {
+      auto prg = makePrgFromPairwiseKey(pairwise, g, PrgLabel::kMulMaliciousShare);
+      out.triples[g].a = prgField(prg);
+      out.triples[g].b = prgField(prg);
+      out.triples[g].c = prgField(prg);
+      out.auth_tuples[g].a_prime = prgField(prg);
+      out.auth_tuples[g].b_prime = prgField(prg);
+      out.auth_tuples[g].c_prime = prgField(prg);
+      out.auth_tuples[g].a_prime_b_prime = prgField(prg);
+      out.auth_tuples[g].a_prime_c_prime = prgField(prg);
+      out.auth_tuples[g].b_prime_c_prime = prgField(prg);
+      out.auth_tuples[g].a_prime_b_prime_c_prime = prgField(prg);
+    }
+  } else if (id_ == helper_id_) {
+    for (size_t g = 0; g < mul_gates.size(); ++g) {
+      auto helper_prg = makePrg(seed_, helper_id_, g, PrgLabel::kMulMaliciousHelper);
+      const Field a = prgField(helper_prg);
+      const Field b = prgField(helper_prg);
+      const Field a_prime = prgField(helper_prg);
+      const Field b_prime = prgField(helper_prg);
+      const Field c_prime = prgField(helper_prg);
+      const Field ab = a * b;
+      const Field a_prime_b_prime = a_prime * b_prime;
+      const Field a_prime_c_prime = a_prime * c_prime;
+      const Field b_prime_c_prime = b_prime * c_prime;
+      const Field a_prime_b_prime_c_prime = a_prime * b_prime * c_prime;
+
+      Field sum_a = Field(0);
+      Field sum_b = Field(0);
+      Field sum_ab = Field(0);
+      Field sum_a_prime = Field(0);
+      Field sum_b_prime = Field(0);
+      Field sum_c_prime = Field(0);
+      Field sum_a_prime_b_prime = Field(0);
+      Field sum_a_prime_c_prime = Field(0);
+      Field sum_b_prime_c_prime = Field(0);
+      Field sum_a_prime_b_prime_c_prime = Field(0);
+      for (int i = 0; i <= nP_ - 2; ++i) {
+        auto pprg = makePrgFromPairwiseKey(key_manager_.keyForParty(i), g,
+                                           PrgLabel::kMulMaliciousShare);
+        sum_a += prgField(pprg);
+        sum_b += prgField(pprg);
+        sum_ab += prgField(pprg);
+        sum_a_prime += prgField(pprg);
+        sum_b_prime += prgField(pprg);
+        sum_c_prime += prgField(pprg);
+        sum_a_prime_b_prime += prgField(pprg);
+        sum_a_prime_c_prime += prgField(pprg);
+        sum_b_prime_c_prime += prgField(pprg);
+        sum_a_prime_b_prime_c_prime += prgField(pprg);
+      }
+
+      const Field pack[10] = {
+          a - sum_a,
+          b - sum_b,
+          ab - sum_ab,
+          a_prime - sum_a_prime,
+          b_prime - sum_b_prime,
+          c_prime - sum_c_prime,
+          a_prime_b_prime - sum_a_prime_b_prime,
+          a_prime_c_prime - sum_a_prime_c_prime,
+          b_prime_c_prime - sum_b_prime_c_prime,
+          a_prime_b_prime_c_prime - sum_a_prime_b_prime_c_prime,
+      };
+      maybeSimulateStep(10 * common::utils::FIELDSIZE);
+      network_->send(nP_ - 1, pack, 10 * common::utils::FIELDSIZE);
+    }
+    network_->flush();
+  } else if (id_ == nP_ - 1) {
+    for (size_t g = 0; g < mul_gates.size(); ++g) {
+      Field pack[10];
+      maybeSimulateStep(10 * common::utils::FIELDSIZE);
+      network_->recv(helper_id_, pack, 10 * common::utils::FIELDSIZE);
+      out.triples[g] = {pack[0], pack[1], pack[2]};
+      out.auth_tuples[g] = {pack[3], pack[4], pack[5], pack[6], pack[7], pack[8], pack[9]};
+    }
+  }
+
+  // Phase-1 malicious bootstrap: additionally prepare additive shares of
+  // global MAC key material [Δ], [Δ^{-1}] for later Ver-DH.
   if (id_ <= nP_ - 2) {
     auto delta_prg =
         makePrgFromPairwiseKey(key_manager_.keyWithHelper(), 0, PrgLabel::kMaliciousDeltaShare);
     out.delta_share = prgField(delta_prg);
     out.delta_inv_share = prgField(delta_prg);
-    return out;
   }
 
   if (id_ == helper_id_) {
@@ -286,7 +369,6 @@ MulOfflineData Protocol::mul_offline_malicious(const std::vector<FIn2Gate>& mul_
     maybeSimulateStep(pack.size() * common::utils::FIELDSIZE);
     network_->send(nP_ - 1, pack.data(), pack.size() * common::utils::FIELDSIZE);
     network_->flush();
-    return out;
   }
 
   if (id_ == nP_ - 1) {
@@ -296,6 +378,7 @@ MulOfflineData Protocol::mul_offline_malicious(const std::vector<FIn2Gate>& mul_
     out.delta_share = pack[0];
     out.delta_inv_share = pack[1];
   }
+  out.ready = true;
   return out;
 }
 

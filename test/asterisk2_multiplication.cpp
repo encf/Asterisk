@@ -268,3 +268,71 @@ BOOST_AUTO_TEST_CASE(malicious_input_sharing_consistency_checked_in_test) {
   BOOST_TEST(sum_x == Field(input_value));
   BOOST_TEST(sum_dx == delta * sum_x);
 }
+
+BOOST_AUTO_TEST_CASE(malicious_offline_generates_authenticated_auxiliary_tuples) {
+  NTL::ZZ_pContext ZZ_p_ctx;
+  ZZ_p_ctx.save();
+  constexpr int nP = 3;
+  constexpr int helper = nP;
+  constexpr int base_port = 21520;
+
+  common::utils::Circuit<Field> circ;
+  auto w0 = circ.newInputWire();
+  auto w1 = circ.newInputWire();
+  auto wm = circ.addGate(common::utils::GateType::kMul, w0, w1);
+  circ.setAsOutput(wm);
+  auto level_circ = circ.orderGatesByLevel();
+
+  struct OfflinePack {
+    asterisk2::TripleShare triple;
+    asterisk2::MulAuthTupleShare auth;
+  };
+
+  std::vector<std::future<OfflinePack>> parties;
+  parties.reserve(nP + 1);
+  for (int pid = 0; pid <= nP; ++pid) {
+    parties.push_back(std::async(std::launch::async, [&, pid]() {
+      ZZ_p_ctx.restore();
+      auto network = std::make_shared<io::NetIOMP>(pid, nP + 1, base_port, nullptr, true);
+      asterisk2::ProtocolConfig cfg;
+      cfg.security_model = asterisk2::SecurityModel::kMalicious;
+      asterisk2::Protocol proto(nP, pid, network, level_circ, 200, cfg);
+      auto off = proto.mul_offline();
+
+      OfflinePack out{};
+      if (pid < nP) {
+        BOOST_REQUIRE_EQUAL(off.triples.size(), 1);
+        BOOST_REQUIRE_EQUAL(off.auth_tuples.size(), 1);
+        out.triple = off.triples[0];
+        out.auth = off.auth_tuples[0];
+      }
+      return out;
+    }));
+  }
+
+  Field a = Field(0), b = Field(0), ab = Field(0);
+  Field a_prime = Field(0), b_prime = Field(0), c_prime = Field(0);
+  Field a_prime_b_prime = Field(0), a_prime_c_prime = Field(0), b_prime_c_prime = Field(0);
+  Field a_prime_b_prime_c_prime = Field(0);
+  for (int pid = 0; pid <= nP; ++pid) {
+    const auto pack = parties[pid].get();
+    if (pid < nP) {
+      a += pack.triple.a;
+      b += pack.triple.b;
+      ab += pack.triple.c;
+      a_prime += pack.auth.a_prime;
+      b_prime += pack.auth.b_prime;
+      c_prime += pack.auth.c_prime;
+      a_prime_b_prime += pack.auth.a_prime_b_prime;
+      a_prime_c_prime += pack.auth.a_prime_c_prime;
+      b_prime_c_prime += pack.auth.b_prime_c_prime;
+      a_prime_b_prime_c_prime += pack.auth.a_prime_b_prime_c_prime;
+    }
+  }
+
+  BOOST_TEST(ab == a * b);
+  BOOST_TEST(a_prime_b_prime == a_prime * b_prime);
+  BOOST_TEST(a_prime_c_prime == a_prime * c_prime);
+  BOOST_TEST(b_prime_c_prime == b_prime * c_prime);
+  BOOST_TEST(a_prime_b_prime_c_prime == a_prime * b_prime * c_prime);
+}
