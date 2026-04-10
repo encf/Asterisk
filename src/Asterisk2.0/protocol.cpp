@@ -252,7 +252,6 @@ MulOfflineData Protocol::mul_offline_semi_honest(const std::vector<FIn2Gate>& mu
   if (id_ == nP_ - 1) {
     for (size_t g = 0; g < mul_gates.size(); ++g) {
       Field pack[3];
-      maybeSimulateStep(3 * common::utils::FIELDSIZE);
       network_->recv(helper_id_, pack, 3 * common::utils::FIELDSIZE);
       out.triples[g] = {pack[0], pack[1], pack[2]};
     }
@@ -460,7 +459,6 @@ std::vector<Field> Protocol::mul_online_malicious(
     std::vector<Field> reconstructed(out_len, Field(0));
     for (int p = 0; p < helper_id_; ++p) {
       std::vector<Field> share_vec(out_len, Field(0));
-      maybeSimulateStep(out_len * common::utils::FIELDSIZE);
       network_->recv(p, share_vec.data(), share_vec.size() * common::utils::FIELDSIZE);
       for (size_t i = 0; i < out_len; ++i) {
         reconstructed[i] += share_vec[i];
@@ -483,7 +481,6 @@ std::vector<Field> Protocol::mul_online_malicious(
   // match helper-side reconstruction.
   const std::vector<Field> local_reconstructed = openVectorToComputingParties(outputs);
   std::vector<Field> helper_reconstructed(out_len, Field(0));
-  maybeSimulateStep(out_len * common::utils::FIELDSIZE);
   network_->recv(helper_id_, helper_reconstructed.data(),
                  helper_reconstructed.size() * common::utils::FIELDSIZE);
   if (local_reconstructed != helper_reconstructed) {
@@ -523,7 +520,6 @@ MaliciousInputShareData Protocol::buildMaliciousInputShares(
 
       if (id_ == helper_id_) {
         Field x_prime = Field(0);
-        maybeSimulateStep(common::utils::FIELDSIZE);
         network_->recv(kDefaultInputOwner, &x_prime, common::utils::FIELDSIZE);
 
         const auto owner_pairwise = key_manager_.keyForParty(kDefaultInputOwner);
@@ -565,7 +561,6 @@ MaliciousInputShareData Protocol::buildMaliciousInputShares(
           delta_x_plus_r_share = prgField(dx_prg);
         } else {
           Field pack[2] = {Field(0), Field(0)};
-          maybeSimulateStep(2 * common::utils::FIELDSIZE);
           network_->recv(helper_id_, pack, 2 * common::utils::FIELDSIZE);
           x_plus_r_share = pack[0];
           delta_x_plus_r_share = pack[1];
@@ -677,7 +672,6 @@ TruncOfflineData Protocol::trunc_offline(size_t batch_size, size_t ell_x, size_t
   } else if (id_ == nP_ - 1) {
     for (size_t idx = 0; idx < batch_size; ++idx) {
       Field pack[2];
-      maybeSimulateStep(2 * common::utils::FIELDSIZE);
       network_->recv(helper_id_, pack, 2 * common::utils::FIELDSIZE);
       off.r_share[idx] = pack[0];
       off.r0_share[idx] = pack[1];
@@ -769,7 +763,6 @@ CompareOfflineData Protocol::compare_offline(size_t lx, size_t s, bool force_t,
     }
   } else if (id_ == nP_ - 1) {
     std::vector<Field> pack(2 * lx, Field(0));
-    maybeSimulateStep(pack.size() * common::utils::FIELDSIZE);
     network_->recv(helper_id_, pack.data(), pack.size() * common::utils::FIELDSIZE);
     for (size_t j = 0; j < lx; ++j) {
       out.trunc_data.r_share[j] = pack[2 * j];
