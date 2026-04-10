@@ -1,10 +1,16 @@
 # Asterisk2.0 vs Asterisk (100 sequential multiplications)
 
+> Note: the protocol implementation has been refactored into explicit offline/online APIs
+> (`mul_*`, `trunc_*`, `compare_*`) so preprocessing and online rounds can be benchmarked separately.
+> In Asterisk2.0 open rounds, the network simulation now follows a full-duplex overlap model:
+> send/recv in the same open round are accounted once as one round latency + bandwidth cost.
+
 Environment:
 - parties: `n=3` computing + `1` helper
 - circuit: `g=1`, `d=100` (100 chain multiplications)
 - repeat: `1`
 - security model: `semi-honest`
+- field modulus: `p = 2^64 - 59 = 18446744073709551557`
 
 ## Commands
 ```sh
@@ -29,6 +35,42 @@ for pid in 0 1 2 3; do
 done
 wait
 ```
+
+## Multiplication correctness check (Asterisk2.0)
+
+`asterisk2_mpc` now supports `--dump-output-shares`, which writes each computing
+party's local output shares into JSON (`local_output_shares`). You can validate
+that reconstructed outputs match the expected chain-multiplication value with:
+
+```sh
+python3 scripts/verify_asterisk2_mul.py --depth 10 --out-dir /tmp/a2_mul_verify
+```
+
+Expected output after this fix:
+- `match=True`
+
+## Probabilistic truncation (Trunc-SH) in Asterisk2.0
+
+`asterisk2_mpc` now supports arithmetic-domain probabilistic truncation after the
+online phase:
+
+- `--trunc-frac-bits m` (enable truncation, remove `m` fractional bits)
+- `--trunc-lx ell_x`
+- `--trunc-slack s`
+
+When enabled together with `--dump-output-shares`, JSON includes:
+- `local_trunc_output_shares`
+- `truncation_offline` and `truncation_offline_bytes` (truncation preprocessing only)
+- `truncation` and `truncation_bytes` (truncation online only)
+- `online` and `online_bytes` remain multiplication-only.
+
+BGTEZ-SH batched truncation/comparison regression tests:
+- `asterisk2_bgtez_test`
+
+Validation rule used by the script:
+- benchmark inputs are fixed as party-0=`5`, others=`0` for every input wire;
+- clear input per wire is therefore `5`;
+- after depth `d` multiplication layers, expected output is `5^(2^d) mod p`.
 
 ## Results (ms / bytes / comm-count)
 - Asterisk2.0 computing parties average (after batched-open optimization)

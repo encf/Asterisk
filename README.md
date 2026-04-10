@@ -3,6 +3,12 @@
 This directory contains the implementation of the Asterisk fair protocol.
 The protocol is implemented in C++17 and [CMake](https://cmake.org/) is used as the build system.
 
+Field modulus is unified to:
+
+```text
+p = 2^64 - 59 = 18446744073709551557
+```
+
 ## 🚀 从零开始跑通（Ubuntu 小白版）
 
 > 下面按“复制即可执行”的顺序写好，默认你在 Ubuntu 22.04/24.04。
@@ -142,12 +148,24 @@ After building benchmarks, run:
 This starts party IDs `0..3` locally and stores logs under:
 `./run_logs/chain_mul_10/`.
 
+## Asterisk2.0 malicious roadmap
+
+- 详细的恶意安全实现任务分解见：`docs/asterisk2_malicious_implementation_plan.md`。
+- 该路线图把实现拆分为认证分享、延迟验证、公平输出释放、恶意乘法、trunc/compare 升级、benchmark 与测试。
+- 当前已落地：malicious 乘法离线/在线分派、authenticated tuple 预处理、`Pi_MACSetup-DH` 与显式 `KeyManager`（`[Δ]` / `[Δ^{-1}]` 由 `runMacSetupDH` 提供）。
+- `KeyManager` 当前维护两类会话密钥：helper<->party pairwise key，以及仅计算方共享的 `K_P`（用于 `compare_offline` 共享掩码/置换生成）。
+- malicious 输入分享已接入：按 `x' = x + r + t` 与 helper 补足 share 的流程生成 `[x]`/`[Δx]`（当前输入 owner 约定为 `P0`）；一致性检查改由单元测试覆盖。
+- malicious 乘法离线预处理已接入 authenticated tuple：除 `[a],[b],[ab]` 外，还会生成 `[a'],[b'],[c'],[a'b'],[a'c'],[b'c'],[a'b'c']` 的 additive shares。
+- `mul_online_malicious` 当前按门级在线流程打开 `d,e,d_Δ,e_Δ,f`，并在本地同步组装 `[xy]` 与 `[Δxy]`（已移除旧的 helper 端输出重构一致性检查路径）。
+- 当前仍在开发：Ver-DH、deferred batch verify、fair release、trunc/compare 的 malicious 验证管线。
+
 ## Usage
 A short description of the compiled programs is given below.
 All of them provide detailed usage description on using the `--help` option.
 
 - `benchmarks/asterisk_mpc`: Benchmark the performance of the Asterisk protocol (both offline and online phases) by evaluating a circuit with a given depth and number of multiplication gates at each depth.
 - `benchmarks/asterisk2_mpc`: Benchmark the performance of the Asterisk2.0 semi-honest Beaver multiplication protocol with one helper party and n computing parties.
+- `benchmarks/asterisk2_bgtez`: Benchmark the Asterisk2.0 BGTEZ-SH batched comparison protocol and output online/offline/communication metrics.
 - `benchmarks/asterisk_online`: Benchmark the performance of the Asterisk online phase for a circuit with a given depth and number of multiplication gates at each depth.
 - `benchmarks/asterisk_offline`: Benchmark the performance of the Asterisk offline phase for a circuit with a given depth and number of multiplication gates at each depth.
 - `benchmarks/assistedmpc_offline`: Benchmark the performance of the Assisted MPC offline phase for a circuit with a given depth and number of multiplication gates at each depth.
@@ -176,7 +194,7 @@ Execute the following commands from the `build` directory created during compila
 #
 # 该程序需要启动 n+1 个进程：其中 0..n-1 为计算方，n 为 helper。
 ./benchmarks/asterisk2_mpc -p $PID --localhost -g 100 -d 10 -n 5
-# 安全模型参数（目前支持 semi-honest；malicious 预留接口）
+# 安全模型参数（semi-honest 完整可用；malicious 为开发中实验路径）
 ./benchmarks/asterisk2_mpc -p $PID --localhost -g 100 -d 10 -n 5 --security-model semi-honest
 # 可选：代码层仿真网络（每个通信步骤增加延迟/带宽上限）
 ./benchmarks/asterisk2_mpc -p $PID --localhost -g 100 -d 10 -n 5 \
@@ -219,6 +237,16 @@ Execute the following commands from the `build` directory created during compila
 ./../Darkpool_VM.sh
 ```
 
+### Asterisk2.0 protocol API (offline/online split)
+
+`src/Asterisk2.0/protocol.h` now exposes explicit offline/online pairs for the three protocol families:
+
+- multiplication: `mul_offline(...)` + `mul_online(...)`
+- truncation: `trunc_offline(...)` + `trunc_online(...)`
+- comparison (BGTEZ): `compare_offline(...)` + `compare_online(...)`
+
+Legacy wrappers (`offline/online`, `probabilisticTruncate`, `bgtezCompare`) are kept for compatibility and internally call the split APIs.
+
 ## Asterisk2.0 vs Asterisk: 100 sequential multiplications
 
 Use `g=1, d=100` to represent 100 sequential multiplications:
@@ -229,6 +257,34 @@ for pid in 0 1 2 3; do
   ./benchmarks/asterisk2_mpc --localhost -n 3 -p "$pid" -g 1 -d 100 -r 1 -o asterisk2_chain100_p"$pid".json &
 done
 wait
+
+# 可选：导出每个计算方的本地输出 share（用于正确性校验）
+for pid in 0 1 2 3; do
+  ./benchmarks/asterisk2_mpc --localhost -n 3 -p "$pid" -g 1 -d 10 -r 1 \
+    --security-model semi-honest --dump-output-shares \
+    -o /tmp/a2_mul_check_p"$pid".json &
+done
+wait
+# 一键重建输出并校验（期望值按 5^(2^d) mod p 计算）
+python3 scripts/verify_asterisk2_mul.py --depth 10 --out-dir /tmp/a2_mul_verify
+
+# 可选：对在线输出继续执行 Asterisk2.0 算术域概率截断（Trunc-SH）
+# 例：移除 m=8 个小数位，ell_x=40，统计裕量 s=8
+for pid in 0 1 2 3; do
+  ./benchmarks/asterisk2_mpc --localhost -n 3 -p "$pid" -g 1 -d 10 -r 1 \
+    --security-model semi-honest --dump-output-shares \
+    --trunc-frac-bits 8 --trunc-lx 40 --trunc-slack 8 \
+    -o /tmp/a2_trunc_check_p"$pid".json &
+done
+wait
+
+# 说明：乘法 online 与 truncation 统计已分开输出
+# - online.* / online_bytes: 仅乘法在线阶段
+# - truncation_offline.* / truncation_offline_bytes: 仅截断离线阶段
+# - truncation.* / truncation_bytes: 仅截断在线阶段
+
+# BGTEZ-SH（批量截断+比较）单测已加入：
+# - tests/asterisk2_bgtez_test
 
 # Asterisk baseline: offline + online split
 for pid in 0 1 2 3; do

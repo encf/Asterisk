@@ -5,6 +5,7 @@
 #include <boost/program_options.hpp>
 #include <iostream>
 #include <memory>
+#include <vector>
 
 #include "utils.h"
 #include "Asterisk2.0/protocol.h"
@@ -57,6 +58,10 @@ void benchmark(const bpo::variables_map& opts) {
   auto latency_ms = opts["latency-ms"].as<double>();
   auto net_model =
       common::utils::resolveNetworkCostModel(net_preset, bandwidth_bps, latency_ms);
+  auto dump_output_shares = opts["dump-output-shares"].as<bool>();
+  auto trunc_frac_bits = opts["trunc-frac-bits"].as<size_t>();
+  auto trunc_lx = opts["trunc-lx"].as<size_t>();
+  auto trunc_slack = opts["trunc-slack"].as<size_t>();
 
   asterisk2::SecurityModel security_model = asterisk2::SecurityModel::kSemiHonest;
   if (security_model_str == "malicious") {
@@ -127,10 +132,43 @@ void benchmark(const bpo::variables_map& opts) {
 
     network->sync();
     StatsPoint online_start(*network);
+    std::vector<Field> local_outputs;
+    std::vector<Field> local_trunc_outputs;
     if (pid < nP) {
-      (void)proto.online(inputs, triples);
+      local_outputs = proto.online(inputs, triples);
     }
     StatsPoint online_end(*network);
+
+    json trunc_offline_bench = {{"time", 0.0}, {"communication", json::array()}};
+    json trunc_online_bench = {{"time", 0.0}, {"communication", json::array()}};
+    size_t trunc_offline_bytes = 0;
+    size_t trunc_online_bytes = 0;
+    if (trunc_frac_bits > 0) {
+      asterisk2::TruncOfflineData trunc_offline_data;
+      network->sync();
+      StatsPoint trunc_offline_start(*network);
+      trunc_offline_data =
+          proto.trunc_offline(circ.outputs.size(), trunc_lx, trunc_frac_bits, trunc_slack);
+      StatsPoint trunc_offline_end(*network);
+      trunc_offline_bench = trunc_offline_end - trunc_offline_start;
+      for (const auto& val : trunc_offline_bench["communication"]) {
+        trunc_offline_bytes += val.get<int64_t>();
+      }
+
+      network->sync();
+      StatsPoint trunc_online_start(*network);
+      if (pid < nP) {
+        local_trunc_outputs = proto.trunc_online(local_outputs, trunc_offline_data);
+      } else {
+        std::vector<Field> helper_placeholder(circ.outputs.size(), Field(0));
+        (void)proto.trunc_online(helper_placeholder, trunc_offline_data);
+      }
+      StatsPoint trunc_online_end(*network);
+      trunc_online_bench = trunc_online_end - trunc_online_start;
+      for (const auto& val : trunc_online_bench["communication"]) {
+        trunc_online_bytes += val.get<int64_t>();
+      }
+    }
 
     auto offline_bench = offline_end - offline_start;
     auto online_bench = online_end - online_start;
@@ -173,11 +211,15 @@ void benchmark(const bpo::variables_map& opts) {
       std::cout << "comm_model_total_ms: " << comm_model_total_ms << "\n";
     }
 
-    output_data["benchmarks"].push_back({
+    json row = {
         {"offline", offline_bench},
         {"online", online_bench},
+        {"truncation_offline", trunc_offline_bench},
+        {"truncation", trunc_online_bench},
         {"offline_bytes", offline_bytes},
         {"online_bytes", online_bytes},
+        {"truncation_offline_bytes", trunc_offline_bytes},
+        {"truncation_bytes", trunc_online_bytes},
         {"offline_comm_count", offline_comm_count},
         {"online_comm_rounds", online_comm_rounds},
         {"online_send_count", online_send_count},
@@ -185,7 +227,22 @@ void benchmark(const bpo::variables_map& opts) {
         {"comm_model_total_ms", comm_model_total_ms},
         // keep online_comm_count for compatibility; now it denotes rounds.
         {"online_comm_count", online_comm_rounds},
-    });
+    };
+    if (pid < nP && dump_output_shares) {
+      json shares = json::array();
+      for (const auto& val : local_outputs) {
+        shares.push_back(NTL::conv<uint64_t>(NTL::rep(val)));
+      }
+      row["local_output_shares"] = shares;
+      if (trunc_frac_bits > 0) {
+        json trunc_shares = json::array();
+        for (const auto& val : local_trunc_outputs) {
+          trunc_shares.push_back(NTL::conv<uint64_t>(NTL::rep(val)));
+        }
+        row["local_trunc_output_shares"] = trunc_shares;
+      }
+    }
+    output_data["benchmarks"].push_back(std::move(row));
   }
 
   if (opts.count("output") != 0) {
@@ -216,6 +273,14 @@ bpo::options_description programOptions() {
        "Communication-cost model bandwidth in bps (overrides preset when >0).")
       ("latency-ms", bpo::value<double>()->default_value(0.0),
        "Communication-cost model latency in ms (overrides preset when >0).")
+      ("dump-output-shares", bpo::bool_switch()->default_value(false),
+       "Dump local output shares in benchmark JSON for correctness validation.")
+      ("trunc-frac-bits", bpo::value<size_t>()->default_value(0),
+       "Enable Asterisk2.0 probabilistic truncation with this many fractional bits.")
+      ("trunc-lx", bpo::value<size_t>()->default_value(40),
+       "Bit-length parameter ell_x for probabilistic truncation.")
+      ("trunc-slack", bpo::value<size_t>()->default_value(8),
+       "Statistical slack parameter s for probabilistic truncation.")
       ("port", bpo::value<int>()->default_value(10000), "Base port for networking.")
       ("output,o", bpo::value<std::string>(), "File to save benchmarks.")
       ("repeat,r", bpo::value<size_t>()->default_value(1), "Number of repetitions.");
@@ -223,7 +288,7 @@ bpo::options_description programOptions() {
 }
 
 int main(int argc, char* argv[]) {
-  ZZ_p::init(conv<ZZ>("17816577890427308801"));
+  ZZ_p::init(conv<ZZ>(common::utils::kFieldPrimeDecimal));
 
   auto prog_opts(programOptions());
   bpo::options_description cmdline("Benchmark Asterisk2.0 half-honest multiplication protocol.");

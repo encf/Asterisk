@@ -23,7 +23,7 @@ constexpr int SECURITY_PARAM = 128;
 
 struct GlobalFixture {
   GlobalFixture() {
-    NTL::ZZ_p::init(NTL::conv<NTL::ZZ>("17816577890427308801"));
+    NTL::ZZ_p::init(NTL::conv<NTL::ZZ>("18446744073709551557"));
   }
 };
 

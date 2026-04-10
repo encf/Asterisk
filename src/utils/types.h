@@ -11,6 +11,7 @@ using namespace NTL;
 
 namespace common::utils {
 using Ring = uint64_t;
+inline constexpr char kFieldPrimeDecimal[] = "18446744073709551557";  // 2^64 - 59
 // constexpr uint64_t FRACTION = 16;
 
 // using Field = NTL::ZZ_p;
