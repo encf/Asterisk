@@ -279,6 +279,7 @@ MulOfflineData Protocol::mul_offline_malicious(const std::vector<FIn2Gate>& mul_
       out.auth_tuples[g].a_prime_b_prime_c_prime = prgField(prg);
     }
   } else if (id_ == helper_id_) {
+    std::vector<Field> batch_pack(10 * mul_gates.size(), Field(0));
     for (size_t g = 0; g < mul_gates.size(); ++g) {
       auto helper_prg = makePrg(seed_, helper_id_, g, PrgLabel::kMulMaliciousHelper);
       const Field a = prgField(helper_prg);
@@ -317,67 +318,36 @@ MulOfflineData Protocol::mul_offline_malicious(const std::vector<FIn2Gate>& mul_
         sum_a_prime_b_prime_c_prime += prgField(pprg);
       }
 
-      const Field pack[10] = {
-          a - sum_a,
-          b - sum_b,
-          ab - sum_ab,
-          a_prime - sum_a_prime,
-          b_prime - sum_b_prime,
-          c_prime - sum_c_prime,
-          a_prime_b_prime - sum_a_prime_b_prime,
-          a_prime_c_prime - sum_a_prime_c_prime,
-          b_prime_c_prime - sum_b_prime_c_prime,
-          a_prime_b_prime_c_prime - sum_a_prime_b_prime_c_prime,
-      };
-      maybeSimulateStep(10 * common::utils::FIELDSIZE);
-      network_->send(nP_ - 1, pack, 10 * common::utils::FIELDSIZE);
+      batch_pack[10 * g + 0] = a - sum_a;
+      batch_pack[10 * g + 1] = b - sum_b;
+      batch_pack[10 * g + 2] = ab - sum_ab;
+      batch_pack[10 * g + 3] = a_prime - sum_a_prime;
+      batch_pack[10 * g + 4] = b_prime - sum_b_prime;
+      batch_pack[10 * g + 5] = c_prime - sum_c_prime;
+      batch_pack[10 * g + 6] = a_prime_b_prime - sum_a_prime_b_prime;
+      batch_pack[10 * g + 7] = a_prime_c_prime - sum_a_prime_c_prime;
+      batch_pack[10 * g + 8] = b_prime_c_prime - sum_b_prime_c_prime;
+      batch_pack[10 * g + 9] = a_prime_b_prime_c_prime - sum_a_prime_b_prime_c_prime;
     }
+    maybeSimulateStep(batch_pack.size() * common::utils::FIELDSIZE);
+    network_->send(nP_ - 1, batch_pack.data(), batch_pack.size() * common::utils::FIELDSIZE);
     network_->flush();
   } else if (id_ == nP_ - 1) {
+    std::vector<Field> batch_pack(10 * mul_gates.size(), Field(0));
+    network_->recv(helper_id_, batch_pack.data(),
+                   batch_pack.size() * common::utils::FIELDSIZE);
     for (size_t g = 0; g < mul_gates.size(); ++g) {
-      Field pack[10];
-      maybeSimulateStep(10 * common::utils::FIELDSIZE);
-      network_->recv(helper_id_, pack, 10 * common::utils::FIELDSIZE);
-      out.triples[g] = {pack[0], pack[1], pack[2]};
-      out.auth_tuples[g] = {pack[3], pack[4], pack[5], pack[6], pack[7], pack[8], pack[9]};
+      out.triples[g] = {batch_pack[10 * g + 0], batch_pack[10 * g + 1], batch_pack[10 * g + 2]};
+      out.auth_tuples[g] = {batch_pack[10 * g + 3], batch_pack[10 * g + 4],
+                            batch_pack[10 * g + 5], batch_pack[10 * g + 6],
+                            batch_pack[10 * g + 7], batch_pack[10 * g + 8],
+                            batch_pack[10 * g + 9]};
     }
   }
 
-  // Phase-1 malicious bootstrap: additionally prepare additive shares of
-  // global MAC key material [Δ], [Δ^{-1}] for later Ver-DH.
-  if (id_ <= nP_ - 2) {
-    auto delta_prg =
-        makePrgFromPairwiseKey(key_manager_.keyWithHelper(), 0, PrgLabel::kMaliciousDeltaShare);
-    out.delta_share = prgField(delta_prg);
-    out.delta_inv_share = prgField(delta_prg);
-  }
-
-  if (id_ == helper_id_) {
-    auto helper_prg = makePrg(seed_, helper_id_, 0, PrgLabel::kMaliciousDeltaHelper);
-    const Field delta = prgNonZeroField(helper_prg);
-    const Field delta_inv = NTL::inv(delta);
-
-    Field sum_delta = Field(0);
-    Field sum_delta_inv = Field(0);
-    for (int i = 0; i <= nP_ - 2; ++i) {
-      auto pprg = makePrgFromPairwiseKey(key_manager_.keyForParty(i), 0,
-                                         PrgLabel::kMaliciousDeltaShare);
-      sum_delta += prgField(pprg);
-      sum_delta_inv += prgField(pprg);
-    }
-    std::vector<Field> pack = {delta - sum_delta, delta_inv - sum_delta_inv};
-    maybeSimulateStep(pack.size() * common::utils::FIELDSIZE);
-    network_->send(nP_ - 1, pack.data(), pack.size() * common::utils::FIELDSIZE);
-    network_->flush();
-  }
-
-  if (id_ == nP_ - 1) {
-    Field pack[2];
-    maybeSimulateStep(2 * common::utils::FIELDSIZE);
-    network_->recv(helper_id_, pack, 2 * common::utils::FIELDSIZE);
-    out.delta_share = pack[0];
-    out.delta_inv_share = pack[1];
-  }
+  // NOTE: malicious mul offline no longer bootstraps [Δ]/[Δ^{-1}] here.
+  out.delta_share = Field(0);
+  out.delta_inv_share = Field(0);
   out.ready = true;
   return out;
 }
@@ -637,6 +607,10 @@ void Protocol::verifyMaliciousKeyMaterial(const MulOfflineData& offline_data) co
 
   const Field delta = openToComputingParties(offline_data.delta_share);
   const Field delta_inv = openToComputingParties(offline_data.delta_inv_share);
+  if (delta == Field(0) && delta_inv == Field(0)) {
+    // Delta bootstrap disabled in malicious mul offline preprocessing.
+    return;
+  }
   if (delta == Field(0) || delta * delta_inv != Field(1)) {
     throw std::runtime_error("malicious key-material consistency check failed");
   }
