@@ -206,6 +206,9 @@ Execute the following commands from the `build` directory created during compila
 ./benchmarks/asterisk2_mpc -p $PID --localhost -g 100 -d 10 -n 5
 # 安全模型参数（semi-honest 完整可用；malicious 为开发中实验路径）
 ./benchmarks/asterisk2_mpc -p $PID --localhost -g 100 -d 10 -n 5 --security-model semi-honest
+# 说明：benchmark 内部会按安全模型走对应的 mul_offline/mul_online 路径，
+# 以保留 malicious 所需的离线材料（不仅是 triples）。
+# 在 malicious 模式下，helper 也会参与 online 流程（例如输入分享阶段）。
 # 可选：代码层仿真网络（每个通信步骤增加延迟/带宽上限）
 ./benchmarks/asterisk2_mpc -p $PID --localhost -g 100 -d 10 -n 5 \
   --sim-latency-ms 2 --sim-bandwidth-mbps 50

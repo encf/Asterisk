@@ -127,7 +127,7 @@ void benchmark(const bpo::variables_map& opts) {
 
     network->sync();
     StatsPoint offline_start(*network);
-    auto triples = proto.offline();
+    auto off_data = proto.mul_offline();
     StatsPoint offline_end(*network);
 
     network->sync();
@@ -135,12 +135,16 @@ void benchmark(const bpo::variables_map& opts) {
     std::vector<Field> local_outputs;
     std::vector<Field> local_trunc_outputs;
     asterisk2::OnlineTimingStats online_timing_stats{};
-    if (pid < nP) {
-      if (security_model == asterisk2::SecurityModel::kSemiHonest) {
-        local_outputs = proto.onlineSemiHonestForBenchmark(inputs, triples);
+    if (security_model == asterisk2::SecurityModel::kSemiHonest) {
+      if (pid < nP) {
+        local_outputs = proto.onlineSemiHonestForBenchmark(inputs, off_data.triples);
         online_timing_stats = proto.onlineTimingStats();
-      } else {
-        local_outputs = proto.online(inputs, triples);
+      }
+    } else {
+      // Malicious online path requires helper participation (e.g., input sharing).
+      auto out = proto.mul_online(inputs, off_data);
+      if (pid < nP) {
+        local_outputs = std::move(out);
       }
     }
     StatsPoint online_end(*network);
