@@ -74,6 +74,64 @@ wait
 - **`Address already in use`**：端口冲突；换 `--port` 或等上次进程退出。
 - **多进程卡住**：通常是某个 `pid` 没启动齐（`0..n` 必须全起）。
 
+### 7) 三种乘法协议一键对比（offline/online 通信与耗时）
+新增脚本：`scripts/compare_mul_protocols.sh`，会自动跑并汇总：
+- Asterisk（`asterisk_offline` + `asterisk_online`）
+- Asterisk2.0 semi-honest（`asterisk2_mpc --security-model semi-honest`）
+- Asterisk2.0 malicious（`asterisk2_mpc --security-model malicious`）
+
+输出指标（平均值）：
+- offline communication（MB）
+- offline time（s）
+- online communication（MB）
+- online time（s）
+
+```sh
+# 示例：n=3 个计算方，连续乘法次数=10（depth=10，默认每层 1 个乘法门）
+./scripts/compare_mul_protocols.sh -n 3 -d 10 -r 3
+
+# 可调参数
+./scripts/compare_mul_protocols.sh --help
+```
+
+> 说明：脚本会启动 `pid=0..n`（含 helper），并把每个 party 的原始 JSON 保存到
+> `run_logs/protocol_compare/` 下。
+
+### 8) 网络环境设置（延迟/带宽）
+
+#### 方式 A：真实网络整形（推荐，用于端到端实验）
+在 Linux 上可用 `tc netem + tbf` 对网卡施加延迟和带宽限制。
+
+依赖（Ubuntu）：
+```sh
+sudo apt-get update
+sudo apt-get install -y iproute2
+```
+
+示例（把 `eth0` 改成你的网卡名）：
+```sh
+# 添加：固定 20ms 延迟，带宽限制 100mbit
+sudo tc qdisc replace dev eth0 root handle 1: netem delay 20ms
+sudo tc qdisc replace dev eth0 parent 1: handle 10: tbf rate 100mbit burst 64kb latency 50ms
+
+# 查看
+tc qdisc show dev eth0
+
+# 清除
+sudo tc qdisc del dev eth0 root
+```
+
+#### 方式 B：通信代价模型（快速估算，不改变真实链路）
+`benchmarks/asterisk2_mpc` 支持内置模型参数：
+- `--net-preset lan|wan`
+- 或 `--bandwidth-bps` + `--latency-ms`
+
+例如：
+```sh
+./build/benchmarks/asterisk2_mpc --localhost -n 3 -p 0 -g 1 -d 10 -r 1 \
+  --security-model semi-honest --bandwidth-bps 100000000 --latency-ms 20
+```
+
 ## External Dependencies
 The following libraries need to be installed separately and should be available to the build system and compiler.
 
