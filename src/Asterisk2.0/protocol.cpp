@@ -387,7 +387,6 @@ std::vector<Field> Protocol::mul_online(const std::unordered_map<wire_t, Field>&
 
 std::vector<Field> Protocol::mul_online_semi_honest(
     const std::unordered_map<wire_t, Field>& inputs, const MulOfflineData& offline_data) {
-  resetOnlineTimingStats();
   if (!offline_data.ready) {
     throw std::runtime_error("mul_online requires ready MulOfflineData from mul_offline");
   }
@@ -428,7 +427,6 @@ std::vector<Field> Protocol::mul_online_semi_honest(
     }
 
     if (!mul_gates.empty()) {
-      const auto local_compute_start = std::chrono::steady_clock::now();
       std::vector<Field> local_open_vec(2 * mul_gates.size(), Field(0));
       for (size_t i = 0; i < mul_gates.size(); ++i) {
         if (mul_idx + i >= offline_data.triples.size()) {
@@ -439,13 +437,8 @@ std::vector<Field> Protocol::mul_online_semi_honest(
         local_open_vec[2 * i] = wire_share_[g->in1] - t.a;
         local_open_vec[2 * i + 1] = wire_share_[g->in2] - t.b;
       }
-      const auto local_compute_before_open = std::chrono::steady_clock::now();
-      online_timing_stats_.local_compute_ms +=
-          std::chrono::duration<double, std::milli>(local_compute_before_open - local_compute_start)
-              .count();
 
       auto opened = openVectorToComputingParties(local_open_vec);
-      const auto local_compute_after_open = std::chrono::steady_clock::now();
       for (size_t i = 0; i < mul_gates.size(); ++i) {
         const auto* g = mul_gates[i];
         const auto& t = offline_data.triples[mul_idx + i];
@@ -457,11 +450,6 @@ std::vector<Field> Protocol::mul_online_semi_honest(
         }
         wire_share_[g->out] = out;
       }
-      const auto local_compute_end = std::chrono::steady_clock::now();
-      online_timing_stats_.local_compute_ms +=
-          std::chrono::duration<double, std::milli>(local_compute_end - local_compute_after_open)
-              .count();
-      online_timing_stats_.ready = true;
       mul_idx += mul_gates.size();
     }
   }
@@ -1079,10 +1067,6 @@ std::vector<Field> Protocol::onlineSemiHonestForBenchmark(
   off.triples = triples;
   off.ready = true;
   return mul_online_semi_honest(inputs, off);
-}
-
-void Protocol::resetOnlineTimingStats() {
-  online_timing_stats_ = OnlineTimingStats{};
 }
 
 std::vector<Field> Protocol::probabilisticTruncate(const std::vector<Field>& x_shares, size_t ell_x,

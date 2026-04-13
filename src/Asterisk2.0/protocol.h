@@ -158,7 +158,6 @@ class Protocol {
                                                             size_t len) const;
   void sendFieldVectorToPeers(const std::vector<int>& peers, const std::vector<Field>& data) const;
   std::vector<int> computingPeerIdsExcludingSelf() const;
-  void resetOnlineTimingStats();
   void initializeMaliciousMacSetup();
 
   int nP_;

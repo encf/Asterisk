@@ -4,8 +4,9 @@
 > (`mul_*`, `trunc_*`, `compare_*`) so preprocessing and online rounds can be benchmarked separately.
 > In semi-honest mode, `asterisk2_mpc` reports online time from the direct
 > `mul_online_semi_honest()` path.
-> It also reports online-time breakdown fields:
-> `online_local_compute_ms` and `online_network_overhead_ms`.
+> It also reports online-time breakdown fields.
+> `online_network_overhead_ms` is actively maintained;
+> `online_local_compute_ms` is currently kept as a reserved compatibility field.
 > Semi-honest online now uses the same vector batched-open primitive as malicious
 > (`openVectorToComputingParties`) to reduce per-round packing overhead.
 
