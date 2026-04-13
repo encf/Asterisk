@@ -329,6 +329,8 @@ wait
 
 当前实现已在在线阶段做按层 batched-open（把该层所有乘法门的 `d/e`
 打包后一次发送/接收）以降低 RTT 开销。
+另外，semi-honest 在线路径也统一复用了向量化 batched-open 原语，
+减少了每轮打包/拆包的额外开销。
 
 本仓库内一次实际跑数结果可见：`docs_asterisk2_benchmark.md`。
 

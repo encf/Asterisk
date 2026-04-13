@@ -143,13 +143,6 @@ class Protocol {
       const std::unordered_map<wire_t, Field>& inputs, const MulOfflineData& offline_data);
 
  private:
-  struct OpenPair {
-    Field d;
-    Field e;
-  };
-
-  std::vector<OpenPair> openPairsToComputingParties(
-      const std::vector<OpenPair>& local_pairs) const;
   Field openToComputingParties(const Field& local_share) const;
   std::vector<Field> openVectorToComputingParties(const std::vector<Field>& local_vec) const;
   MulOfflineData mul_offline_semi_honest(const std::vector<FIn2Gate>& mul_gates);

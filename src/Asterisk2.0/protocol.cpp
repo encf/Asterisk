@@ -429,29 +429,31 @@ std::vector<Field> Protocol::mul_online_semi_honest(
 
     if (!mul_gates.empty()) {
       const auto local_compute_start = std::chrono::steady_clock::now();
-      std::vector<OpenPair> local_pairs(mul_gates.size());
+      std::vector<Field> local_open_vec(2 * mul_gates.size(), Field(0));
       for (size_t i = 0; i < mul_gates.size(); ++i) {
         if (mul_idx + i >= offline_data.triples.size()) {
           throw std::runtime_error("Insufficient Beaver triples in mul_online phase");
         }
         const auto* g = mul_gates[i];
         const auto& t = offline_data.triples[mul_idx + i];
-        local_pairs[i].d = wire_share_[g->in1] - t.a;
-        local_pairs[i].e = wire_share_[g->in2] - t.b;
+        local_open_vec[2 * i] = wire_share_[g->in1] - t.a;
+        local_open_vec[2 * i + 1] = wire_share_[g->in2] - t.b;
       }
       const auto local_compute_before_open = std::chrono::steady_clock::now();
       online_timing_stats_.local_compute_ms +=
           std::chrono::duration<double, std::milli>(local_compute_before_open - local_compute_start)
               .count();
 
-      auto opened = openPairsToComputingParties(local_pairs);
+      auto opened = openVectorToComputingParties(local_open_vec);
       const auto local_compute_after_open = std::chrono::steady_clock::now();
       for (size_t i = 0; i < mul_gates.size(); ++i) {
         const auto* g = mul_gates[i];
         const auto& t = offline_data.triples[mul_idx + i];
-        Field out = opened[i].e * t.a + opened[i].d * t.b + t.c;
+        const Field d = opened[2 * i];
+        const Field e = opened[2 * i + 1];
+        Field out = e * t.a + d * t.b + t.c;
         if (id_ == 0) {
-          out += opened[i].d * opened[i].e;
+          out += d * e;
         }
         wire_share_[g->out] = out;
       }
@@ -1089,39 +1091,6 @@ std::vector<Field> Protocol::probabilisticTruncate(const std::vector<Field>& x_s
   return trunc_online(x_shares, off);
 }
 
-std::vector<Protocol::OpenPair> Protocol::openPairsToComputingParties(
-    const std::vector<OpenPair>& local_pairs) const {
-  if (id_ >= helper_id_) {
-    return {};
-  }
-
-  std::vector<Field> send_buf(local_pairs.size() * 2);
-  for (size_t i = 0; i < local_pairs.size(); ++i) {
-    send_buf[2 * i] = local_pairs[i].d;
-    send_buf[2 * i + 1] = local_pairs[i].e;
-  }
-
-  const auto peers = computingPeerIdsExcludingSelf();
-  const auto network_phase_start = std::chrono::steady_clock::now();
-  // Full-duplex model: peer send/recv overlap in one open round.
-  sendFieldVectorToPeers(peers, send_buf);
-
-  std::vector<OpenPair> sums = local_pairs;
-  auto recv_all = recvFieldVectorsFromPeers(peers, send_buf.size());
-  const auto network_phase_end = std::chrono::steady_clock::now();
-  auto* self = const_cast<Protocol*>(this);
-  self->online_timing_stats_.network_overhead_ms +=
-      std::chrono::duration<double, std::milli>(network_phase_end - network_phase_start).count();
-  self->online_timing_stats_.ready = true;
-  for (const auto& recv_buf : recv_all) {
-    for (size_t i = 0; i < local_pairs.size(); ++i) {
-      sums[i].d += recv_buf[2 * i];
-      sums[i].e += recv_buf[2 * i + 1];
-    }
-  }
-  return sums;
-}
-
 Field Protocol::openToComputingParties(const Field& local_share) const {
   if (id_ >= helper_id_) {
     return Field(0);
@@ -1150,11 +1119,16 @@ std::vector<Field> Protocol::openVectorToComputingParties(const std::vector<Fiel
 
   const auto peers = computingPeerIdsExcludingSelf();
   std::vector<Field> opened = local_vec;
-  const size_t bytes = local_vec.size() * common::utils::FIELDSIZE;
   // Full-duplex model: this batched open is one round (send+recv overlap).
+  const auto network_phase_start = std::chrono::steady_clock::now();
   sendFieldVectorToPeers(peers, local_vec);
 
   auto recv_all = recvFieldVectorsFromPeers(peers, local_vec.size());
+  const auto network_phase_end = std::chrono::steady_clock::now();
+  auto* self = const_cast<Protocol*>(this);
+  self->online_timing_stats_.network_overhead_ms +=
+      std::chrono::duration<double, std::milli>(network_phase_end - network_phase_start).count();
+  self->online_timing_stats_.ready = true;
   for (const auto& recv_buf : recv_all) {
     for (size_t i = 0; i < local_vec.size(); ++i) {
       opened[i] += recv_buf[i];

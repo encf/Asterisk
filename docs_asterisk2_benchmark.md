@@ -6,6 +6,8 @@
 > `mul_online_semi_honest()` path.
 > It also reports online-time breakdown fields:
 > `online_local_compute_ms` and `online_network_overhead_ms`.
+> Semi-honest online now uses the same vector batched-open primitive as malicious
+> (`openVectorToComputingParties`) to reduce per-round packing overhead.
 
 Environment:
 - parties: `n=3` computing + `1` helper
