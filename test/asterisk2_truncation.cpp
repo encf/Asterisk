@@ -3,6 +3,7 @@
 
 #include <future>
 #include <memory>
+#include <unordered_map>
 #include <vector>
 
 #include <io/netmp.h>
@@ -143,4 +144,79 @@ BOOST_AUTO_TEST_CASE(trunc_offline_online_equivalent_to_legacy_api) {
   };
 
   BOOST_TEST(run(base_port_legacy, false) == run(base_port_split, true));
+}
+
+BOOST_AUTO_TEST_CASE(malicious_truncation_authenticated_correctness) {
+  NTL::ZZ_pContext ZZ_p_ctx;
+  ZZ_p_ctx.save();
+  constexpr int nP = 3;
+  constexpr int helper = nP;
+  constexpr int base_port = 22400;
+  constexpr size_t ell_x = 40;
+  constexpr size_t m = 8;
+  constexpr size_t s = 8;
+  constexpr uint64_t x_clear = 654321;
+
+  common::utils::Circuit<Field> circ;
+  auto w0 = circ.newInputWire();
+  auto level_circ = circ.orderGatesByLevel();
+
+  struct AuthPack {
+    Field y{Field(0)};
+    Field dy{Field(0)};
+    Field delta{Field(0)};
+  };
+
+  std::vector<std::future<AuthPack>> parties;
+  parties.reserve(nP + 1);
+  for (int pid = 0; pid <= nP; ++pid) {
+    parties.push_back(std::async(std::launch::async, [&, pid]() {
+      ZZ_p_ctx.restore();
+      auto network = std::make_shared<io::NetIOMP>(pid, nP + 1, base_port, nullptr, true);
+      asterisk2::ProtocolConfig cfg;
+      cfg.security_model = asterisk2::SecurityModel::kMalicious;
+      asterisk2::Protocol proto(nP, pid, network, level_circ, 200, cfg);
+
+      auto mul_off = proto.mul_offline();
+      network->sync();
+
+      std::unordered_map<common::utils::wire_t, Field> inputs;
+      inputs[w0] = (pid == 0) ? Field(x_clear) : Field(0);
+      auto auth_in = proto.maliciousInputShareForTesting(inputs, mul_off);
+
+      auto trunc_off = proto.trunc_offline_malicious(1, ell_x, m, s);
+      std::vector<Field> x_share(1, Field(0));
+      std::vector<Field> dx_share(1, Field(0));
+      if (pid < nP) {
+        x_share[0] = auth_in.x_shares.at(w0);
+        dx_share[0] = auth_in.delta_x_shares.at(w0);
+      }
+      auto trunc_auth = proto.trunc_online_malicious(x_share, dx_share, trunc_off);
+      if (pid == helper) {
+        return AuthPack{};
+      }
+      BOOST_REQUIRE_EQUAL(trunc_auth.trunc_x_shares.size(), 1);
+      BOOST_REQUIRE_EQUAL(trunc_auth.trunc_delta_x_shares.size(), 1);
+      return AuthPack{trunc_auth.trunc_x_shares[0], trunc_auth.trunc_delta_x_shares[0],
+                      trunc_off.delta_share};
+    }));
+  }
+
+  Field sum_y = Field(0);
+  Field sum_dy = Field(0);
+  Field delta = Field(0);
+  for (int pid = 0; pid <= nP; ++pid) {
+    const auto pack = parties[pid].get();
+    if (pid < nP) {
+      sum_y += pack.y;
+      sum_dy += pack.dy;
+      delta += pack.delta;
+    }
+  }
+
+  const uint64_t y_u64 = NTL::conv<uint64_t>(NTL::rep(sum_y));
+  const uint64_t floor_val = x_clear >> m;
+  const bool ok = (y_u64 == floor_val) || (y_u64 == floor_val + 1);
+  BOOST_TEST(ok);
+  BOOST_TEST(sum_dy == delta * sum_y);
 }

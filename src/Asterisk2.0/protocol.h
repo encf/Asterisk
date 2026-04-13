@@ -51,7 +51,16 @@ struct TruncOfflineData {
   size_t s{0};
   std::vector<Field> r_share;
   std::vector<Field> r0_share;
+  // Malicious-mode authenticated masks.
+  std::vector<Field> delta_r_share;
+  std::vector<Field> delta_r0_share;
+  Field delta_share{Field(0)};
   bool ready{false};
+};
+
+struct AuthTruncResult {
+  std::vector<Field> trunc_x_shares;
+  std::vector<Field> trunc_delta_x_shares;
 };
 
 struct BatchedTruncOfflineData {
@@ -114,8 +123,12 @@ class Protocol {
   std::vector<Field> mul_online(const std::unordered_map<wire_t, Field>& inputs,
                                 const MulOfflineData& offline_data);
   TruncOfflineData trunc_offline(size_t batch_size, size_t ell_x, size_t m, size_t s);
+  TruncOfflineData trunc_offline_malicious(size_t batch_size, size_t ell_x, size_t m, size_t s);
   std::vector<Field> trunc_online(const std::vector<Field>& x_shares,
                                   const TruncOfflineData& offline_data);
+  AuthTruncResult trunc_online_malicious(const std::vector<Field>& x_shares,
+                                         const std::vector<Field>& delta_x_shares,
+                                         const TruncOfflineData& offline_data);
   CompareOfflineData compare_offline(size_t lx, size_t s,
                                      bool force_t = false, bool forced_t_value = false);
   Field compare_online(const Field& x_share, const CompareOfflineData& offline_data,

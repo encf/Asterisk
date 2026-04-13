@@ -1,6 +1,7 @@
 #include "protocol.h"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <future>
@@ -29,6 +30,10 @@ enum class PrgLabel : uint64_t {
   kMaliciousDeltaHelper = 0x4d4143444c54484cULL,
   kTruncShare = 0x5452554e43534852ULL,
   kTruncHelper = 0x5452554e43484c50ULL,
+  kTruncMalRShare = 0x54524d4c52534852ULL,
+  kTruncMalR0Share = 0x54524d4c52305348ULL,
+  kTruncMalDeltaRShare = 0x54524d4c44525348ULL,
+  kTruncMalDeltaR0Share = 0x54524d4c44523053ULL,
   kCmpMask = 0x434d504d41534b53ULL,
   kCmpShuffle = 0x434d505348554646ULL,
   kCmpBit = 0x434d504249545f5fULL,
@@ -78,6 +83,16 @@ Field prgNonZeroField(emp::PRG& prg) {
     f = prgField(prg);
   }
   return f;
+}
+
+std::array<Field, 4> deriveOfflineMaskShare(const PairwiseKey& pairwise_key, uint64_t idx,
+                                            uint64_t bound_r, uint64_t bound_r0) {
+  auto r_prg = makePrgFromPairwiseKey(pairwise_key, idx, PrgLabel::kTruncMalRShare);
+  auto r0_prg = makePrgFromPairwiseKey(pairwise_key, idx, PrgLabel::kTruncMalR0Share);
+  auto dr_prg = makePrgFromPairwiseKey(pairwise_key, idx, PrgLabel::kTruncMalDeltaRShare);
+  auto dr0_prg = makePrgFromPairwiseKey(pairwise_key, idx, PrgLabel::kTruncMalDeltaR0Share);
+  return {prgFieldBounded(r_prg, bound_r), prgFieldBounded(r0_prg, bound_r0), prgField(dr_prg),
+          prgField(dr0_prg)};
 }
 
 bool prgBit(emp::PRG& prg) {
@@ -684,6 +699,9 @@ void Protocol::verifyMaliciousKeyMaterial(const MulOfflineData& offline_data) co
 }
 
 TruncOfflineData Protocol::trunc_offline(size_t batch_size, size_t ell_x, size_t m, size_t s) {
+  if (config_.security_model == SecurityModel::kMalicious) {
+    return trunc_offline_malicious(batch_size, ell_x, m, s);
+  }
   if (id_ > helper_id_) {
     return {};
   }
@@ -747,8 +765,95 @@ TruncOfflineData Protocol::trunc_offline(size_t batch_size, size_t ell_x, size_t
   return off;
 }
 
+TruncOfflineData Protocol::trunc_offline_malicious(size_t batch_size, size_t ell_x, size_t m,
+                                                   size_t s) {
+  if (id_ > helper_id_) {
+    return {};
+  }
+  if (m == 0 || m > ell_x) {
+    throw std::runtime_error("trunc_offline_malicious requires 0 < m <= ell_x");
+  }
+  if (ell_x + s + 1 >= 64) {
+    throw std::runtime_error("trunc_offline_malicious requires ell_x + s + 1 < 64");
+  }
+  if (!malicious_mac_setup_ready_) {
+    throw std::runtime_error("trunc_offline_malicious requires malicious MAC setup");
+  }
+
+  TruncOfflineData off;
+  off.ell_x = ell_x;
+  off.m = m;
+  off.s = s;
+  off.r_share.assign(batch_size, Field(0));
+  off.r0_share.assign(batch_size, Field(0));
+  off.delta_r_share.assign(batch_size, Field(0));
+  off.delta_r0_share.assign(batch_size, Field(0));
+
+  const uint64_t bound_r = pow2Bound(ell_x - m + s);
+  const uint64_t bound_r0 = pow2Bound(m);
+
+  if (id_ == helper_id_) {
+    for (size_t idx = 0; idx < batch_size; ++idx) {
+      auto helper_prg = makePrg(seed_, helper_id_, idx, PrgLabel::kTruncHelper);
+      const Field r = prgFieldBounded(helper_prg, bound_r);
+      const Field r0 = prgFieldBounded(helper_prg, bound_r0);
+      const Field delta_r = helper_delta_ * r;
+      const Field delta_r0 = helper_delta_ * r0;
+
+      Field sum_r = Field(0);
+      Field sum_r0 = Field(0);
+      Field sum_delta_r = Field(0);
+      Field sum_delta_r0 = Field(0);
+      for (int i = 0; i <= nP_ - 2; ++i) {
+        const auto share =
+            deriveOfflineMaskShare(key_manager_.keyForParty(i), idx, bound_r, bound_r0);
+        sum_r += share[0];
+        sum_r0 += share[1];
+        sum_delta_r += share[2];
+        sum_delta_r0 += share[3];
+      }
+
+      Field pack[4] = {r - sum_r, r0 - sum_r0, delta_r - sum_delta_r,
+                       delta_r0 - sum_delta_r0};
+      network_->send(nP_ - 1, pack, 4 * common::utils::FIELDSIZE);
+    }
+    network_->flush();
+    off.ready = true;
+    return off;
+  }
+
+  if (id_ <= nP_ - 2) {
+    const auto pairwise_key = key_manager_.keyWithHelper();
+    for (size_t idx = 0; idx < batch_size; ++idx) {
+      const auto share = deriveOfflineMaskShare(pairwise_key, idx, bound_r, bound_r0);
+      off.r_share[idx] = share[0];
+      off.r0_share[idx] = share[1];
+      off.delta_r_share[idx] = share[2];
+      off.delta_r0_share[idx] = share[3];
+    }
+    off.delta_share = malicious_delta_share_;
+  } else if (id_ == nP_ - 1) {
+    for (size_t idx = 0; idx < batch_size; ++idx) {
+      Field pack[4];
+      network_->recv(helper_id_, pack, 4 * common::utils::FIELDSIZE);
+      off.r_share[idx] = pack[0];
+      off.r0_share[idx] = pack[1];
+      off.delta_r_share[idx] = pack[2];
+      off.delta_r0_share[idx] = pack[3];
+    }
+    off.delta_share = malicious_delta_share_;
+  }
+
+  off.ready = true;
+  return off;
+}
+
 std::vector<Field> Protocol::trunc_online(const std::vector<Field>& x_shares,
                                           const TruncOfflineData& offline_data) {
+  if (config_.security_model == SecurityModel::kMalicious) {
+    throw std::runtime_error(
+        "trunc_online in malicious mode requires trunc_online_malicious with [x] and [Δx]");
+  }
   if (id_ > helper_id_) {
     return {};
   }
@@ -777,6 +882,84 @@ std::vector<Field> Protocol::trunc_online(const std::vector<Field>& x_shares,
                 offline_data.r0_share[idx];
     out[idx] = lambda_m * (x_shares[idx] - d_i);
   }
+  return out;
+}
+
+AuthTruncResult Protocol::trunc_online_malicious(const std::vector<Field>& x_shares,
+                                                 const std::vector<Field>& delta_x_shares,
+                                                 const TruncOfflineData& offline_data) {
+  AuthTruncResult out;
+  if (id_ > helper_id_) {
+    return out;
+  }
+  if (!offline_data.ready) {
+    throw std::runtime_error("trunc_online_malicious requires ready TruncOfflineData");
+  }
+  if (x_shares.size() != delta_x_shares.size() || offline_data.r_share.size() != x_shares.size() ||
+      offline_data.r0_share.size() != x_shares.size() ||
+      offline_data.delta_r_share.size() != x_shares.size() ||
+      offline_data.delta_r0_share.size() != x_shares.size()) {
+    throw std::runtime_error("trunc_online_malicious input/offline vector sizes mismatch");
+  }
+  if (offline_data.m == 0 || offline_data.m > offline_data.ell_x) {
+    throw std::runtime_error("trunc_online_malicious invalid truncation parameters");
+  }
+
+  const uint64_t two_pow_m = pow2Bound(offline_data.m);
+  const uint64_t two_pow_lx_minus_1 = pow2Bound(offline_data.ell_x - 1);
+  const Field two_pow_m_field = NTL::conv<Field>(NTL::to_ZZ(two_pow_m));
+  const Field shift_field = NTL::conv<Field>(NTL::to_ZZ(two_pow_lx_minus_1));
+  const Field lambda_m = inv(two_pow_m_field);
+
+  out.trunc_x_shares.assign(x_shares.size(), Field(0));
+  out.trunc_delta_x_shares.assign(x_shares.size(), Field(0));
+
+  for (size_t idx = 0; idx < x_shares.size(); ++idx) {
+    const Field z_i = x_shares[idx] + ((id_ == 0) ? shift_field : Field(0));
+    const Field delta_z_i = delta_x_shares[idx] + offline_data.delta_share * shift_field;
+
+    const Field c_i = z_i + two_pow_m_field * offline_data.r_share[idx] + offline_data.r0_share[idx];
+    const Field delta_c_i =
+        delta_z_i + two_pow_m_field * offline_data.delta_r_share[idx] + offline_data.delta_r0_share[idx];
+    const Field c = openToComputingParties(c_i);
+
+    if (id_ < helper_id_) {
+      const Field c_dc_i = offline_data.delta_share * c - delta_c_i;
+      network_->send(helper_id_, &c_dc_i, common::utils::FIELDSIZE);
+      network_->flush();
+    } else {
+      Field sum = Field(0);
+      for (int p = 0; p < helper_id_; ++p) {
+        Field recv = Field(0);
+        network_->recv(p, &recv, common::utils::FIELDSIZE);
+        sum += recv;
+      }
+      const uint8_t ok = (sum == Field(0)) ? 1 : 0;
+      for (int p = 0; p < helper_id_; ++p) {
+        network_->send(p, &ok, sizeof(ok));
+      }
+      network_->flush();
+      if (ok == 0) {
+        throw std::runtime_error("trunc_online_malicious consistency check failed");
+      }
+      continue;
+    }
+
+    uint8_t verdict = 0;
+    network_->recv(helper_id_, &verdict, sizeof(verdict));
+    if (verdict == 0) {
+      throw std::runtime_error("trunc_online_malicious aborted by helper");
+    }
+
+    const uint64_t c_u64 = NTL::conv<uint64_t>(NTL::rep(c));
+    const uint64_t c0 = c_u64 & (two_pow_m - 1);
+    const Field c0_field = NTL::conv<Field>(NTL::to_ZZ(c0));
+    const Field d_i = ((id_ == 0) ? c0_field : Field(0)) - offline_data.r0_share[idx];
+    const Field delta_d_i = offline_data.delta_share * c0_field - offline_data.delta_r0_share[idx];
+    out.trunc_x_shares[idx] = lambda_m * (x_shares[idx] - d_i);
+    out.trunc_delta_x_shares[idx] = lambda_m * (delta_x_shares[idx] - delta_d_i);
+  }
+
   return out;
 }
 
