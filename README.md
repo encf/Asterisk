@@ -164,6 +164,31 @@ tc qdisc show dev eth0
 > 脚本中的 `Asterisk (baseline)` 使用现有 `asterisk_offline` + `asterisk_online`
 > 作为基线口径进行 offline/online 通信与时间对比。
 
+### 10) 定点数乘法（一次整数乘法 + 一次截断）对比脚本
+新增脚本：`scripts/compare_fixedpoint_mul_a2.sh`，对比：
+- Asterisk2.0 semi-honest
+- Asterisk2.0 malicious
+
+输出指标（单位已统一）：
+- offline communication（MB）
+- offline time（s）
+- online communication（MB）
+- online time（s）
+
+```sh
+# 示例：n=3 个计算方，定点数乘法次数=20
+./scripts/compare_fixedpoint_mul_a2.sh -n 3 -c 20
+
+# 可调参数
+./scripts/compare_fixedpoint_mul_a2.sh --help
+```
+
+参数说明：
+- `-n/--num-parties`：计算方数量
+- `-c/--fixed-mul-count`：定点数乘法次数
+- `--frac-bits`：截断的小数位数 m
+- `--ell-x`、`--slack`：截断参数
+
 ## External Dependencies
 The following libraries need to be installed separately and should be available to the build system and compiler.
 

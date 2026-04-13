@@ -138,8 +138,13 @@ void benchmark(const bpo::variables_map& opts) {
       asterisk2::TruncOfflineData trunc_offline_data;
       network->sync();
       StatsPoint trunc_offline_start(*network);
-      trunc_offline_data =
-          proto.trunc_offline(circ.outputs.size(), trunc_lx, trunc_frac_bits, trunc_slack);
+      if (security_model == asterisk2::SecurityModel::kSemiHonest) {
+        trunc_offline_data =
+            proto.trunc_offline(circ.outputs.size(), trunc_lx, trunc_frac_bits, trunc_slack);
+      } else {
+        trunc_offline_data = proto.trunc_offline_malicious(circ.outputs.size(), trunc_lx,
+                                                           trunc_frac_bits, trunc_slack);
+      }
       StatsPoint trunc_offline_end(*network);
       trunc_offline_bench = trunc_offline_end - trunc_offline_start;
       for (const auto& val : trunc_offline_bench["communication"]) {
@@ -148,11 +153,43 @@ void benchmark(const bpo::variables_map& opts) {
 
       network->sync();
       StatsPoint trunc_online_start(*network);
-      if (pid < nP) {
-        local_trunc_outputs = proto.trunc_online(local_outputs, trunc_offline_data);
+      if (security_model == asterisk2::SecurityModel::kSemiHonest) {
+        if (pid < nP) {
+          local_trunc_outputs = proto.trunc_online(local_outputs, trunc_offline_data);
+        } else {
+          std::vector<Field> helper_placeholder(circ.outputs.size(), Field(0));
+          (void)proto.trunc_online(helper_placeholder, trunc_offline_data);
+        }
       } else {
-        std::vector<Field> helper_placeholder(circ.outputs.size(), Field(0));
-        (void)proto.trunc_online(helper_placeholder, trunc_offline_data);
+        std::vector<Field> x_auth(circ.outputs.size(), Field(0));
+        std::vector<Field> dx_auth(circ.outputs.size(), Field(0));
+        if (!circ.gates_by_level.empty()) {
+          common::utils::wire_t first_input = 0;
+          bool found = false;
+          for (const auto& g : circ.gates_by_level[0]) {
+            if (g->type == common::utils::GateType::kInp) {
+              first_input = g->out;
+              found = true;
+              break;
+            }
+          }
+          if (found) {
+            std::unordered_map<common::utils::wire_t, Field> auth_inputs;
+            auth_inputs[first_input] = (pid == 0) ? Field(5) : Field(0);
+            auto auth_shares = proto.maliciousInputShareForTesting(auth_inputs, off_data);
+            if (pid < nP) {
+              std::fill(x_auth.begin(), x_auth.end(), auth_shares.x_shares.at(first_input));
+              std::fill(dx_auth.begin(), dx_auth.end(),
+                        auth_shares.delta_x_shares.at(first_input));
+            }
+          }
+        }
+        if (pid < nP) {
+          auto auth_trunc = proto.trunc_online_malicious(x_auth, dx_auth, trunc_offline_data);
+          local_trunc_outputs = std::move(auth_trunc.trunc_x_shares);
+        } else {
+          (void)proto.trunc_online_malicious(x_auth, dx_auth, trunc_offline_data);
+        }
       }
       StatsPoint trunc_online_end(*network);
       trunc_online_bench = trunc_online_end - trunc_online_start;
