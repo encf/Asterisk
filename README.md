@@ -121,6 +121,15 @@ tc qdisc show dev eth0
 sudo tc qdisc del dev eth0 root
 ```
 
+如果你要**一键恢复默认网络状态**（避免遗留限速/延迟），可执行：
+```sh
+# 删除 root qdisc（若不存在则忽略报错）
+sudo tc qdisc del dev eth0 root 2>/dev/null || true
+
+# 确认已经恢复（通常显示 fq_codel/pfifo_fast 等默认队列）
+tc qdisc show dev eth0
+```
+
 #### 方式 B：通信代价模型（快速估算，不改变真实链路）
 `benchmarks/asterisk2_mpc` 支持内置模型参数：
 - `--net-preset lan|wan`
