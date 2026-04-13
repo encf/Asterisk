@@ -7,8 +7,8 @@
 > It also reports online-time breakdown fields.
 > `online_network_overhead_ms` is actively maintained;
 > `online_local_compute_ms` is currently kept as a reserved compatibility field.
-> Semi-honest online now uses the same vector batched-open primitive as malicious
-> (`openVectorToComputingParties`) to reduce per-round packing overhead.
+> Semi-honest online currently uses per-gate opens (one open per multiplication gate),
+> while malicious opens `d,e,d_Δ,e_Δ,f` per gate.
 
 Environment:
 - parties: `n=3` computing + `1` helper
@@ -76,7 +76,7 @@ Validation rule used by the script:
 - after depth `d` multiplication layers, expected output is `5^(2^d) mod p`.
 
 ## Results (ms / bytes / comm-count)
-- Asterisk2.0 computing parties average (after batched-open optimization)
+- Asterisk2.0 computing parties average
   - offline: `0.423747 ms`
   - online: `7.051593 ms`
   - offline bytes: `0`
@@ -95,16 +95,14 @@ Validation rule used by the script:
   - online bytes: `533.33`
 
 ## Quick takeaways
-- Compared with the previous unbatched implementation (`online ~= 14.94 ms`),
-  batched-open reduces Asterisk2.0 online time by about 2.1x in this setup.
 - For this setup, Asterisk2.0 has lower offline latency for computing parties,
   while online is now much closer to Asterisk baseline (`7.05 ms` vs `5.92 ms`).
 - Multiplication-round view:
-  - Asterisk2.0: one batched-open interactive round per multiplicative depth (`100` rounds here).
+  - Asterisk2.0: semi-honest path opens per multiplication gate (for `g=1,d=100`,即 `100` opens)。
   - Asterisk (current implementation path): two aggregation exchanges per depth for multiplication values,
     i.e. about `2 * depth = 200` interaction rounds in this test shape.
 
-With `--parallel-send`, Asterisk2.0 uses parallel peer send/recv during batched-open, and
+With `--parallel-send`, Asterisk2.0 uses parallel peer send/recv during online opens, and
 `online_send_count` is reported with parallel-link accounting (one logical send per round).
 For narrow levels (e.g., `g=1`), runtime automatically falls back to serial I/O to avoid
 thread-management overhead.

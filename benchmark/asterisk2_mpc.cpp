@@ -76,19 +76,6 @@ void benchmark(const bpo::variables_map& opts) {
   }
 
   auto circ = generateCircuit(gates_per_level, depth).orderGatesByLevel();
-  size_t mul_depths = 0;
-  for (const auto& level : circ.gates_by_level) {
-    bool has_mul = false;
-    for (const auto& gate : level) {
-      if (gate->type == common::utils::GateType::kMul) {
-        has_mul = true;
-        break;
-      }
-    }
-    if (has_mul) {
-      ++mul_depths;
-    }
-  }
 
   std::unordered_map<common::utils::wire_t, Field> inputs;
   if (pid < nP) {
@@ -188,15 +175,15 @@ void benchmark(const bpo::variables_map& opts) {
 
     // Communication counters:
     // - offline_comm_count: helper sends one triple tuple per multiplication gate to Pn.
-    // - online_comm_rounds: batched-open does one interactive round per multiplicative depth.
+    // - online_comm_rounds: multiplication online currently opens once per multiplication gate.
     // - online_send_count: if parallel_send=true, count one logical round-send;
     //   else count per-peer sends.
     size_t mul_gates = gates_per_level * depth;
     size_t offline_comm_count = (pid == nP ? mul_gates : 0);
-    size_t online_comm_rounds = (pid < nP ? mul_depths : 0);
+    size_t online_comm_rounds = (pid < nP ? mul_gates : 0);
     size_t online_send_count = 0;
     if (pid < nP) {
-      online_send_count = parallel_send ? mul_depths : mul_depths * (nP - 1);
+      online_send_count = parallel_send ? mul_gates : mul_gates * (nP - 1);
     }
     // Simplified communication model:
     //   round_time = latency_ms + (bytes * 8) * 1000 / bandwidth_bps

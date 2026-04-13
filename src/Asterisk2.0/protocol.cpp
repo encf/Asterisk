@@ -427,23 +427,20 @@ std::vector<Field> Protocol::mul_online_semi_honest(
     }
 
     if (!mul_gates.empty()) {
-      std::vector<Field> local_open_vec(2 * mul_gates.size(), Field(0));
       for (size_t i = 0; i < mul_gates.size(); ++i) {
         if (mul_idx + i >= offline_data.triples.size()) {
           throw std::runtime_error("Insufficient Beaver triples in mul_online phase");
         }
         const auto* g = mul_gates[i];
         const auto& t = offline_data.triples[mul_idx + i];
-        local_open_vec[2 * i] = wire_share_[g->in1] - t.a;
-        local_open_vec[2 * i + 1] = wire_share_[g->in2] - t.b;
-      }
-
-      auto opened = openVectorToComputingParties(local_open_vec);
-      for (size_t i = 0; i < mul_gates.size(); ++i) {
-        const auto* g = mul_gates[i];
-        const auto& t = offline_data.triples[mul_idx + i];
-        const Field d = opened[2 * i];
-        const Field e = opened[2 * i + 1];
+        const Field d_share = wire_share_[g->in1] - t.a;
+        const Field e_share = wire_share_[g->in2] - t.b;
+        const auto opened = openVectorToComputingParties({d_share, e_share});
+        if (opened.size() != 2) {
+          throw std::runtime_error("semi-honest online open failed");
+        }
+        const Field d = opened[0];
+        const Field e = opened[1];
         Field out = e * t.a + d * t.b + t.c;
         if (id_ == 0) {
           out += d * e;

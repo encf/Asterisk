@@ -317,9 +317,9 @@ wait
 - `offline.time`, `online.time`
 - `offline_bytes`, `online_bytes`
 - `offline_comm_count`
-- `online_comm_rounds`（在线交互轮次，按 multiplicative depth 统计）
+- `online_comm_rounds`（在线交互轮次，当前按乘法门数量统计）
 - `online_send_count`（在线 send 次数，`online_comm_rounds * (n-1)`）
-- 若开启 `--parallel-send`，在线 batched-open 将并行对端发送/接收，
+- 若开启 `--parallel-send`，在线开值阶段将并行对端发送/接收，
   且 `online_send_count` 统计为每轮 1 次逻辑发送。
   对很窄的层（例如 `g=1`）会自动退化为串行路径以避免线程开销。
 - 若开启通信代价模型（`--net-preset` 或 `--bandwidth-bps/--latency-ms`）：
@@ -327,10 +327,8 @@ wait
   - `comm_model_total_ms`：总通信时间估计
 - `online_comm_count`（兼容旧字段，当前等于 `online_comm_rounds`）
 
-当前实现已在在线阶段做按层 batched-open（把该层所有乘法门的 `d/e`
-打包后一次发送/接收）以降低 RTT 开销。
-另外，semi-honest 在线路径也统一复用了向量化 batched-open 原语，
-减少了每轮打包/拆包的额外开销。
+当前实现中，semi-honest 乘法在线路径采用“按门 open（每门一次）”策略，
+恶意路径同样使用按门开值（每门会打开 `d,e,d_Δ,e_Δ,f`）。
 
 本仓库内一次实际跑数结果可见：`docs_asterisk2_benchmark.md`。
 
