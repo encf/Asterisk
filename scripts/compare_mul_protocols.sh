@@ -92,7 +92,13 @@ run_multiparty "asterisk2_semi_honest" "$((BASE_PORT + 400))" \
 run_multiparty "asterisk2_malicious" "$((BASE_PORT + 600))" \
   "${BUILD_DIR}/benchmarks/asterisk2_mpc" -g "${GATES_PER_LEVEL}" -d "${CHAIN_MUL}" --security-model malicious
 
-python - "${OUT_DIR}" "${N}" <<'PY'
+PYTHON_BIN="$(command -v python3 || command -v python || true)"
+if [[ -z "${PYTHON_BIN}" ]]; then
+  echo "Python interpreter not found. Please install python3." >&2
+  exit 1
+fi
+
+"${PYTHON_BIN}" - "${OUT_DIR}" "${N}" <<'PY'
 import json
 import pathlib
 import statistics
