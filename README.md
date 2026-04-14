@@ -39,7 +39,7 @@ sudo apt-get install -y \
 ### 2) 安装 EMP Tool（推荐先用官方脚本）
 ```sh
 wget https://raw.githubusercontent.com/emp-toolkit/emp-readme/master/scripts/install.py
-python install.py --deps --tool
+python3 install.py --deps --tool
 ```
 
 如果你所在网络环境里 `git clone github.com` 不稳定/被限制，可用 tarball 方式安装：
@@ -53,14 +53,21 @@ sudo cmake --install /tmp/emp-tool-master/build
 
 ### 3) 编译项目
 ```sh
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j"$(nproc)" --target benchmarks tests
-
-# 推荐：启用 ccache 以加速重复编译
+# 推荐（启用 ccache）
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_C_COMPILER_LAUNCHER=ccache \
   -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 cmake --build build -j"$(nproc)" --target benchmarks tests
+
+# 不使用 ccache 时可用：
+# cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+# cmake --build build -j"$(nproc)" --target benchmarks tests
+```
+
+### 3.5) 运行基础测试（建议）
+```sh
+# 注意：部分测试会占用固定端口，建议串行运行避免端口冲突
+ctest --test-dir build --output-on-failure -j1
 ```
 
 ### 4) 先做一个最小验收（确认真的跑通）
@@ -233,12 +240,10 @@ The project uses [CMake](https://cmake.org/) for building the source code.
 To compile, run the following commands from the root directory of the repository:
 
 ```sh
-mkdir build && cd build
-cmake -DCMAKE_BUILD_TYPE=Release ..
-
-# The two main targets are 'benchmarks' and 'tests' corresponding to
-# binaries used to run benchmarks and unit tests respectively.
-make <target>
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+  -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+cmake --build build -j"$(nproc)" --target benchmarks tests
 ```
 
 ### Ubuntu one-click dependency install
@@ -255,17 +260,16 @@ EMP installer script:
 
 ```sh
 wget https://raw.githubusercontent.com/emp-toolkit/emp-readme/master/scripts/install.py
-python install.py --deps --tool
+python3 install.py --deps --tool
 ```
 
 Then compile:
 
 ```sh
-mkdir -p build && cd build
-cmake -DCMAKE_BUILD_TYPE=Release \
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_C_COMPILER_LAUNCHER=ccache \
-  -DCMAKE_CXX_COMPILER_LAUNCHER=ccache ..
-make -j"$(nproc)" tests benchmarks
+  -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+cmake --build build -j"$(nproc)" --target tests benchmarks
 ```
 
 ### Example: 10 sequential multiplications (MPC)

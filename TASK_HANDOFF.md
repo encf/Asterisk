@@ -87,3 +87,18 @@
 - [todo] `请统一 Asterisk 与 Asterisk2.0 的通信轮次统计口径，并在两个 benchmark JSON 中输出同名字段（例如 actual_online_rounds），同时补充回归测试与文档。`
 - [todo] `请新增 scripts/compare_mpc_costs.py：自动运行 Asterisk/Asterisk2.0，汇总 raw time、bytes、comm_model_round_ms、comm_model_total_ms 到 CSV，并生成 Markdown 报告。`
 - [todo] `请为 network_cost_model 增加单元测试（C++ + Python），覆盖 LAN/WAN 预设、参数覆盖、all-to-all 公式和边界输入。`
+
+## 9) 本次补充（2026-04-14）
+- [done] 复现“从 README 无法直接跑通”的问题：在未安装 `emp-tool` 时，`cmake` 会报 `Could not find emp-toolConfig.cmake`。
+- [done] 依赖检查并安装缺失包：`libntl-dev`、`libboost-all-dev`、`nlohmann-json3-dev`。
+- [done] 执行 `./scripts/install_deps_ubuntu.sh`，确认可本地构建并安装 `emp-tool` 到 `/usr/local`。
+- [done] 更新 `README.md` 的从零启动命令：
+  - 统一 `python3 install.py --deps --tool`（替换 `python`）；
+  - 统一使用 `cmake -S/-B` + `cmake --build`；
+  - 删除重复/易混淆的 `make <target>` 与旧目录切换写法；
+  - 增加 `ctest --test-dir build` 的基础验证步骤。
+- [done] 实机验证：
+  - `cmake -S . -B build_fresh ... && cmake --build build_fresh --target benchmarks tests`
+  - `./build_fresh/benchmarks/asterisk_mpc --help`
+  - `./build_fresh/benchmarks/asterisk2_mpc --help`
+  - 4 进程最小实验（`asterisk2_mpc`）成功输出 JSON。
