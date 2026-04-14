@@ -9,6 +9,15 @@ Field modulus is unified to:
 p = 2^64 - 59 = 18446744073709551557
 ```
 
+## 🧭 开发执行清单（贡献者工作流）
+
+为保证每次任务可复现、可交接，建议在开发时固定执行以下流程：
+
+1. **先检查依赖再开发**：确认 `cmake`、`g++`、`openssl`、`gmp`、`ntl`、`boost`、`nlohmann-json`、`emp-tool` 可用；缺失则先安装。
+2. **阶段化更新进度**：每完成一个阶段（如“分析 / 开发 / 验证”），同步更新任务进度记录（例如 `TASK_HANDOFF.md`）。
+3. **改完必须验证**：至少运行可执行的构建或测试命令（例如 `cmake --build ...` / `ctest`）。
+4. **同步文档**：代码行为、脚本参数、实验方式有变化时，必须同步更新 README / docs / handoff 文档，保证后续同学可直接接手。
+
 ## 🚀 从零开始跑通（Ubuntu 小白版）
 
 > 下面按“复制即可执行”的顺序写好，默认你在 Ubuntu 22.04/24.04。
@@ -73,6 +82,121 @@ wait
 - **`Could not find ... emp-toolConfig.cmake`**：EMP Tool 没安装成功，回到第 2 步重新安装。
 - **`Address already in use`**：端口冲突；换 `--port` 或等上次进程退出。
 - **多进程卡住**：通常是某个 `pid` 没启动齐（`0..n` 必须全起）。
+
+### 7) 三种乘法协议一键对比（offline/online 通信与耗时）
+新增脚本：`scripts/compare_mul_protocols.sh`，会自动跑并汇总：
+- Asterisk（`asterisk_offline` + `asterisk_online`）
+- Asterisk2.0 semi-honest（`asterisk2_mpc --security-model semi-honest`）
+- Asterisk2.0 malicious（`asterisk2_mpc --security-model malicious`）
+
+输出指标（平均值）：
+- offline communication（MB）
+- offline time（s）
+- online communication（MB）
+- online time（s）
+
+```sh
+# 示例：n=3 个计算方，连续乘法次数=10（depth=10，默认每层 1 个乘法门）
+./scripts/compare_mul_protocols.sh -n 3 -d 10 -r 3
+
+# 可调参数
+./scripts/compare_mul_protocols.sh --help
+```
+
+> 说明：脚本会启动 `pid=0..n`（含 helper），并把每个 party 的原始 JSON 保存到
+> `run_logs/protocol_compare/` 下。
+
+### 8) 网络环境设置（延迟/带宽）
+
+#### 方式 A：真实网络整形（推荐，用于端到端实验）
+在 Linux 上可用 `tc netem + tbf` 对网卡施加延迟和带宽限制。
+
+依赖（Ubuntu）：
+```sh
+sudo apt-get update
+sudo apt-get install -y iproute2
+```
+
+示例（把 `eth0` 改成你的网卡名）：
+```sh
+# 添加：固定 20ms 延迟，带宽限制 100mbit
+sudo tc qdisc replace dev eth0 root handle 1: netem delay 20ms
+sudo tc qdisc replace dev eth0 parent 1: handle 10: tbf rate 100mbit burst 64kb latency 50ms
+
+# 查看
+tc qdisc show dev eth0
+
+# 清除
+sudo tc qdisc del dev eth0 root
+```
+
+如果你要**一键恢复默认网络状态**（避免遗留限速/延迟），可执行：
+```sh
+# 删除 root qdisc（若不存在则忽略报错）
+sudo tc qdisc del dev eth0 root 2>/dev/null || true
+
+# 确认已经恢复（通常显示 fq_codel/pfifo_fast 等默认队列）
+tc qdisc show dev eth0
+```
+
+#### 方式 B：通信代价模型（快速估算，不改变真实链路）
+`benchmarks/asterisk2_mpc` 支持内置模型参数：
+- `--net-preset lan|wan`
+- 或 `--bandwidth-bps` + `--latency-ms`
+
+例如：
+```sh
+./build/benchmarks/asterisk2_mpc --localhost -n 3 -p 0 -g 1 -d 10 -r 1 \
+  --security-model semi-honest --bandwidth-bps 100000000 --latency-ms 20
+```
+
+### 9) 比较协议对比脚本（Asterisk / Asterisk2.0 SH / Asterisk2.0 malicious）
+新增脚本：`scripts/compare_cmp_protocols.sh`，输出三方对比表：
+- offline communication（MB）
+- offline time（s）
+- online communication（MB）
+- online time（s）
+
+```sh
+# 示例：n=3 个计算方，比较次数=20
+./scripts/compare_cmp_protocols.sh -n 3 -c 20
+
+# 可调参数（含 lx/slack）
+./scripts/compare_cmp_protocols.sh --help
+```
+
+参数说明：
+- `-n/--num-parties`：计算方数量
+- `-c/--compare-count`：比较次数（Asterisk2.0 BGTEZ 使用 repeat 跑多次比较）
+
+> 备注：当前仓库里 Asterisk（旧协议）没有独立 BGTEZ benchmark 二进制，
+> 脚本中的 `Asterisk (baseline)` 使用现有 `asterisk_offline` + `asterisk_online`
+> 作为基线口径进行 offline/online 通信与时间对比。
+
+### 10) 定点数乘法（一次整数乘法 + 一次截断）对比脚本
+新增脚本：`scripts/compare_fixedpoint_mul_a2.sh`，对比：
+- Asterisk2.0 semi-honest
+- Asterisk2.0 malicious
+
+输出指标（单位已统一）：
+- offline communication（MB）
+- offline time（s）
+- online communication（MB）
+- online time（s）
+
+```sh
+# 示例：n=3 个计算方，定点数乘法次数=20
+./scripts/compare_fixedpoint_mul_a2.sh -n 3 -c 20
+
+# 可调参数
+./scripts/compare_fixedpoint_mul_a2.sh --help
+```
+
+参数说明：
+- `-n/--num-parties`：计算方数量
+- `-c/--fixed-mul-count`：定点数乘法次数
+- `--frac-bits`：截断的小数位数 m
+- `--ell-x`、`--slack`：截断参数
 
 ## External Dependencies
 The following libraries need to be installed separately and should be available to the build system and compiler.
@@ -168,7 +292,9 @@ This starts party IDs `0..3` locally and stores logs under:
 - malicious 乘法离线预处理已接入 authenticated tuple：除 `[a],[b],[ab]` 外，还会生成 `[a'],[b'],[c'],[a'b'],[a'c'],[b'c'],[a'b'c']` 的 additive shares。
 - `Pi_MACSetup-DH` 现在在 malicious 模式协议初始化阶段执行一次；后续 `mul_offline_malicious` 仅复用已缓存的 `[Δ]/[Δ^{-1}]` 份额。
 - `mul_online_malicious` 当前按门级在线流程打开 `d,e,d_Δ,e_Δ,f`，并在本地同步组装 `[xy]` 与 `[Δxy]`（已移除旧的 helper 端输出重构一致性检查路径）。
-- 当前仍在开发：Ver-DH、deferred batch verify、fair release、trunc/compare 的 malicious 验证管线。
+- 已新增 malicious 认证概率截断 split 接口：`trunc_offline_malicious(...)` 与 `trunc_online_malicious(...)`，可从 `[x],[Δx]` 输出 `[Trunc_m(x)],[ΔTrunc_m(x)]`。
+- 已新增 malicious 认证比较 split 接口：`compare_offline_malicious(...)` 与 `compare_online_malicious(...)`，输入 `[x],[Δx]` 输出 `[GTEZ(x)],[ΔGTEZ(x)]`，在线流程固定为 3 轮。
+- 当前仍在开发：Ver-DH、deferred batch verify、fair release。
 
 ## Usage
 A short description of the compiled programs is given below.
@@ -210,9 +336,6 @@ Execute the following commands from the `build` directory created during compila
 # 说明：benchmark 内部会按安全模型走对应的 mul_offline/mul_online 路径，
 # 以保留 malicious 所需的离线材料（不仅是 triples）。
 # 在 malicious 模式下，helper 也会参与 online 流程（例如输入分享阶段）。
-# 可选：代码层仿真网络（每个通信步骤增加延迟/带宽上限）
-./benchmarks/asterisk2_mpc -p $PID --localhost -g 100 -d 10 -n 5 \
-  --sim-latency-ms 2 --sim-bandwidth-mbps 50
 # 可选：开启在线阶段并行对端发送/接收，并按并行链路口径统计发送次数
 ./benchmarks/asterisk2_mpc -p $PID --localhost -g 100 -d 10 -n 5 --parallel-send
 # 可选：通信代价模型预设（LAN/WAN）
@@ -221,9 +344,9 @@ Execute the following commands from the `build` directory created during compila
 ./benchmarks/asterisk2_mpc -p $PID --localhost -g 100 -d 10 -n 5 \
   --bandwidth-bps 100000000 --latency-ms 20
 
-# semi-honest 模式会额外输出在线阶段细分时间：
-# - online_local_compute_ms
-# - online_network_overhead_ms
+# semi-honest 模式会输出在线阶段细分字段：
+# - online_network_overhead_ms（当前实现重点统计）
+# - online_local_compute_ms（预留字段，当前不再单独计时）
 
 # The `asterisk_mpc` script in the repository root can be used to run the programs 
 # for all parties from the same terminal.
@@ -320,9 +443,9 @@ wait
 - `offline.time`, `online.time`
 - `offline_bytes`, `online_bytes`
 - `offline_comm_count`
-- `online_comm_rounds`（在线交互轮次，按 multiplicative depth 统计）
+- `online_comm_rounds`（在线交互轮次，当前按乘法门数量统计）
 - `online_send_count`（在线 send 次数，`online_comm_rounds * (n-1)`）
-- 若开启 `--parallel-send`，在线 batched-open 将并行对端发送/接收，
+- 若开启 `--parallel-send`，在线开值阶段将并行对端发送/接收，
   且 `online_send_count` 统计为每轮 1 次逻辑发送。
   对很窄的层（例如 `g=1`）会自动退化为串行路径以避免线程开销。
 - 若开启通信代价模型（`--net-preset` 或 `--bandwidth-bps/--latency-ms`）：
@@ -330,12 +453,8 @@ wait
   - `comm_model_total_ms`：总通信时间估计
 - `online_comm_count`（兼容旧字段，当前等于 `online_comm_rounds`）
 
-当前实现已在在线阶段做按层 batched-open（把该层所有乘法门的 `d/e`
-打包后一次发送/接收）以降低 RTT 开销。
-
-若你无法使用 `tc/netem`（例如容器缺少 `NET_ADMIN` 权限），可直接使用
-`--sim-latency-ms` 和 `--sim-bandwidth-mbps` 在代码层做网络开销仿真。
-当前仿真模型按通信步骤(step)估算：`step_time = 传播延迟(一次) + 该步骤总传输字节/带宽`。
+当前实现中，semi-honest 乘法在线路径采用“按门 open（每门一次）”策略，
+恶意路径同样使用按门开值（每门会打开 `d,e,d_Δ,e_Δ,f`）。
 
 本仓库内一次实际跑数结果可见：`docs_asterisk2_benchmark.md`。
 

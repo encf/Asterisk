@@ -50,8 +50,6 @@ void benchmark(const bpo::variables_map& opts) {
   auto repeat = opts["repeat"].as<size_t>();
   auto port = opts["port"].as<int>();
   auto security_model_str = opts["security-model"].as<std::string>();
-  auto sim_latency_ms = opts["sim-latency-ms"].as<double>();
-  auto sim_bandwidth_mbps = opts["sim-bandwidth-mbps"].as<double>();
   auto parallel_send = opts["parallel-send"].as<bool>();
   auto net_preset = opts["net-preset"].as<std::string>();
   auto bandwidth_bps = opts["bandwidth-bps"].as<uint64_t>();
@@ -78,19 +76,6 @@ void benchmark(const bpo::variables_map& opts) {
   }
 
   auto circ = generateCircuit(gates_per_level, depth).orderGatesByLevel();
-  size_t mul_depths = 0;
-  for (const auto& level : circ.gates_by_level) {
-    bool has_mul = false;
-    for (const auto& gate : level) {
-      if (gate->type == common::utils::GateType::kMul) {
-        has_mul = true;
-        break;
-      }
-    }
-    if (has_mul) {
-      ++mul_depths;
-    }
-  }
 
   std::unordered_map<common::utils::wire_t, Field> inputs;
   if (pid < nP) {
@@ -109,8 +94,6 @@ void benchmark(const bpo::variables_map& opts) {
                             {"seed", seed},
                             {"repeat", repeat},
                             {"security_model", security_model_str},
-                            {"sim_latency_ms", sim_latency_ms},
-                            {"sim_bandwidth_mbps", sim_bandwidth_mbps},
                             {"parallel_send", parallel_send},
                             {"net_preset", net_preset},
                             {"bandwidth_bps", net_model.bandwidth_bps},
@@ -120,8 +103,6 @@ void benchmark(const bpo::variables_map& opts) {
   for (size_t r = 0; r < repeat; ++r) {
     asterisk2::ProtocolConfig cfg;
     cfg.security_model = security_model;
-    cfg.sim_latency_ms = sim_latency_ms;
-    cfg.sim_bandwidth_mbps = sim_bandwidth_mbps;
     cfg.parallel_send = parallel_send;
     asterisk2::Protocol proto(nP, pid, network, circ, static_cast<int>(seed), cfg);
 
@@ -157,8 +138,13 @@ void benchmark(const bpo::variables_map& opts) {
       asterisk2::TruncOfflineData trunc_offline_data;
       network->sync();
       StatsPoint trunc_offline_start(*network);
-      trunc_offline_data =
-          proto.trunc_offline(circ.outputs.size(), trunc_lx, trunc_frac_bits, trunc_slack);
+      if (security_model == asterisk2::SecurityModel::kSemiHonest) {
+        trunc_offline_data =
+            proto.trunc_offline(circ.outputs.size(), trunc_lx, trunc_frac_bits, trunc_slack);
+      } else {
+        trunc_offline_data = proto.trunc_offline_malicious(circ.outputs.size(), trunc_lx,
+                                                           trunc_frac_bits, trunc_slack);
+      }
       StatsPoint trunc_offline_end(*network);
       trunc_offline_bench = trunc_offline_end - trunc_offline_start;
       for (const auto& val : trunc_offline_bench["communication"]) {
@@ -167,11 +153,43 @@ void benchmark(const bpo::variables_map& opts) {
 
       network->sync();
       StatsPoint trunc_online_start(*network);
-      if (pid < nP) {
-        local_trunc_outputs = proto.trunc_online(local_outputs, trunc_offline_data);
+      if (security_model == asterisk2::SecurityModel::kSemiHonest) {
+        if (pid < nP) {
+          local_trunc_outputs = proto.trunc_online(local_outputs, trunc_offline_data);
+        } else {
+          std::vector<Field> helper_placeholder(circ.outputs.size(), Field(0));
+          (void)proto.trunc_online(helper_placeholder, trunc_offline_data);
+        }
       } else {
-        std::vector<Field> helper_placeholder(circ.outputs.size(), Field(0));
-        (void)proto.trunc_online(helper_placeholder, trunc_offline_data);
+        std::vector<Field> x_auth(circ.outputs.size(), Field(0));
+        std::vector<Field> dx_auth(circ.outputs.size(), Field(0));
+        if (!circ.gates_by_level.empty()) {
+          common::utils::wire_t first_input = 0;
+          bool found = false;
+          for (const auto& g : circ.gates_by_level[0]) {
+            if (g->type == common::utils::GateType::kInp) {
+              first_input = g->out;
+              found = true;
+              break;
+            }
+          }
+          if (found) {
+            std::unordered_map<common::utils::wire_t, Field> auth_inputs;
+            auth_inputs[first_input] = (pid == 0) ? Field(5) : Field(0);
+            auto auth_shares = proto.maliciousInputShareForTesting(auth_inputs, off_data);
+            if (pid < nP) {
+              std::fill(x_auth.begin(), x_auth.end(), auth_shares.x_shares.at(first_input));
+              std::fill(dx_auth.begin(), dx_auth.end(),
+                        auth_shares.delta_x_shares.at(first_input));
+            }
+          }
+        }
+        if (pid < nP) {
+          auto auth_trunc = proto.trunc_online_malicious(x_auth, dx_auth, trunc_offline_data);
+          local_trunc_outputs = std::move(auth_trunc.trunc_x_shares);
+        } else {
+          (void)proto.trunc_online_malicious(x_auth, dx_auth, trunc_offline_data);
+        }
       }
       StatsPoint trunc_online_end(*network);
       trunc_online_bench = trunc_online_end - trunc_online_start;
@@ -194,15 +212,15 @@ void benchmark(const bpo::variables_map& opts) {
 
     // Communication counters:
     // - offline_comm_count: helper sends one triple tuple per multiplication gate to Pn.
-    // - online_comm_rounds: batched-open does one interactive round per multiplicative depth.
+    // - online_comm_rounds: multiplication online currently opens once per multiplication gate.
     // - online_send_count: if parallel_send=true, count one logical round-send;
     //   else count per-peer sends.
     size_t mul_gates = gates_per_level * depth;
     size_t offline_comm_count = (pid == nP ? mul_gates : 0);
-    size_t online_comm_rounds = (pid < nP ? mul_depths : 0);
+    size_t online_comm_rounds = (pid < nP ? mul_gates : 0);
     size_t online_send_count = 0;
     if (pid < nP) {
-      online_send_count = parallel_send ? mul_depths : mul_depths * (nP - 1);
+      online_send_count = parallel_send ? mul_gates : mul_gates * (nP - 1);
     }
     // Simplified communication model:
     //   round_time = latency_ms + (bytes * 8) * 1000 / bandwidth_bps
@@ -273,10 +291,6 @@ bpo::options_description programOptions() {
       ("localhost", bpo::bool_switch(), "All parties are on same machine.")
       ("security-model", bpo::value<std::string>()->default_value("semi-honest"),
        "Security model: semi-honest or malicious.")
-      ("sim-latency-ms", bpo::value<double>()->default_value(0.0),
-       "Simulated per-step latency in milliseconds.")
-      ("sim-bandwidth-mbps", bpo::value<double>()->default_value(0.0),
-       "Simulated bandwidth cap in Mbps (<=0 disables).")
       ("parallel-send", bpo::bool_switch()->default_value(false),
        "Enable parallel peer send/recv for sufficiently wide levels; report one logical send per round.")
       ("net-preset", bpo::value<std::string>()->default_value("none"),

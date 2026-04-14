@@ -51,7 +51,16 @@ struct TruncOfflineData {
   size_t s{0};
   std::vector<Field> r_share;
   std::vector<Field> r0_share;
+  // Malicious-mode authenticated masks.
+  std::vector<Field> delta_r_share;
+  std::vector<Field> delta_r0_share;
+  Field delta_share{Field(0)};
   bool ready{false};
+};
+
+struct AuthTruncResult {
+  std::vector<Field> trunc_x_shares;
+  std::vector<Field> trunc_delta_x_shares;
 };
 
 struct BatchedTruncOfflineData {
@@ -75,6 +84,23 @@ struct CompareOfflineData {
   bool ready{false};
 };
 
+struct CompareOfflineDataMalicious {
+  size_t lx{0};
+  size_t s{0};
+  std::vector<Field> r_share;
+  std::vector<Field> r0_share;
+  std::vector<Field> delta_r_share;
+  std::vector<Field> delta_r0_share;
+  Field delta_share{Field(0)};
+  CompareMaskData cmp_data;
+  bool ready{false};
+};
+
+struct AuthCompareResult {
+  Field gtez_share{Field(0)};
+  Field delta_gtez_share{Field(0)};
+};
+
 enum class SecurityModel {
   kSemiHonest,
   kMalicious,
@@ -82,10 +108,6 @@ enum class SecurityModel {
 
 struct ProtocolConfig {
   SecurityModel security_model{SecurityModel::kSemiHonest};
-  // Simulated network latency per communication step in milliseconds.
-  double sim_latency_ms{0.0};
-  // Simulated bandwidth cap in megabits per second (<=0 disables).
-  double sim_bandwidth_mbps{0.0};
   // Enable parallel peer send/recv in each communication step.
   bool parallel_send{false};
   // TODO(malicious): move pairwise/shared-key generation to Asterisk-style
@@ -118,12 +140,22 @@ class Protocol {
   std::vector<Field> mul_online(const std::unordered_map<wire_t, Field>& inputs,
                                 const MulOfflineData& offline_data);
   TruncOfflineData trunc_offline(size_t batch_size, size_t ell_x, size_t m, size_t s);
+  TruncOfflineData trunc_offline_malicious(size_t batch_size, size_t ell_x, size_t m, size_t s);
   std::vector<Field> trunc_online(const std::vector<Field>& x_shares,
                                   const TruncOfflineData& offline_data);
+  AuthTruncResult trunc_online_malicious(const std::vector<Field>& x_shares,
+                                         const std::vector<Field>& delta_x_shares,
+                                         const TruncOfflineData& offline_data);
   CompareOfflineData compare_offline(size_t lx, size_t s,
                                      bool force_t = false, bool forced_t_value = false);
   Field compare_online(const Field& x_share, const CompareOfflineData& offline_data,
                        BGTEZStats* stats = nullptr);
+  CompareOfflineDataMalicious compare_offline_malicious(size_t lx, size_t s,
+                                                        bool force_t = false,
+                                                        bool forced_t_value = false);
+  AuthCompareResult compare_online_malicious(
+      const Field& x_share, const Field& delta_x_share,
+      const CompareOfflineDataMalicious& offline_data);
 
   std::vector<TripleShare> offline();
 
@@ -147,13 +179,6 @@ class Protocol {
       const std::unordered_map<wire_t, Field>& inputs, const MulOfflineData& offline_data);
 
  private:
-  struct OpenPair {
-    Field d;
-    Field e;
-  };
-
-  std::vector<OpenPair> openPairsToComputingParties(
-      const std::vector<OpenPair>& local_pairs) const;
   Field openToComputingParties(const Field& local_share) const;
   std::vector<Field> openVectorToComputingParties(const std::vector<Field>& local_vec) const;
   MulOfflineData mul_offline_semi_honest(const std::vector<FIn2Gate>& mul_gates);
@@ -169,10 +194,6 @@ class Protocol {
                                                             size_t len) const;
   void sendFieldVectorToPeers(const std::vector<int>& peers, const std::vector<Field>& data) const;
   std::vector<int> computingPeerIdsExcludingSelf() const;
-  void maybeSimulateStep(size_t aggregate_bytes) const;
-  void maybeSimulateLatency() const;
-  void maybeSimulateBandwidth(size_t bytes) const;
-  void resetOnlineTimingStats();
   void initializeMaliciousMacSetup();
 
   int nP_;
