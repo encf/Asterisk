@@ -184,6 +184,7 @@ run_case() {
   local repeat="$4"
   local port="$5"
   local run_dir="${OUT_DIR}/${model}/${case_tag}"
+  echo "[RUN] model=${model}, case=${case_tag}, gates=${gates}, repeat=${repeat}, port=${port}"
   rm -rf "${run_dir}"
   mkdir -p "${run_dir}"
   local -a jobs=()
@@ -199,6 +200,7 @@ run_case() {
   done
 
   wait_for_jobs "${jobs[@]}"
+  echo "[DONE] model=${model}, case=${case_tag}"
 }
 
 run_model() {
