@@ -70,9 +70,13 @@ done
 
 mkdir -p "${OUT_DIR}"
 
-cmake -S "${ROOT_DIR}" -B "${BUILD_DIR}" -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache >/dev/null
-cmake --build "${BUILD_DIR}" -j"$(nproc)" --target asterisk2_mpc >/dev/null
+if [[ ! -x "${BUILD_DIR}/benchmarks/asterisk2_mpc" ]]; then
+  echo "Missing benchmark binary: ${BUILD_DIR}/benchmarks/asterisk2_mpc" >&2
+  echo "Please build it first, for example:" >&2
+  echo "  cmake -S \"${ROOT_DIR}\" -B \"${BUILD_DIR}\" -DCMAKE_BUILD_TYPE=Release" >&2
+  echo "  cmake --build \"${BUILD_DIR}\" -j\$(nproc) --target asterisk2_mpc" >&2
+  exit 1
+fi
 
 run_case() {
   local model="$1"
