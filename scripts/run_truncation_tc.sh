@@ -11,7 +11,7 @@ N=5
 BATCH_SIZE=1000
 SINGLE_REPEAT=5
 BATCH_REPEAT=1
-BASE_PORT=65000
+BASE_PORT=""
 PING_COUNT=5
 CLEAR_TC_ON_EXIT=1
 LABEL=""
@@ -33,7 +33,7 @@ Options:
   --batch-repeat <int>          Repetitions for the batched run (default: 1)
   --delay <int>                 Symmetric one-way delay in ms on `lo` (default: 20)
   --bandwidth <rate>            tc rate, e.g. 100mbit (default: 100mbit)
-  --base-port <int>             Base port for benchmark processes (default: 65000)
+  --base-port <int>             Base port for benchmark processes (default: auto-pick a free range)
   --ping-count <int>            ping probes used after tc setup (default: 5)
   --label <text>                Optional label for saved outputs
   --out-dir <path>              Output directory (default: run_logs/truncation_tc)
@@ -52,9 +52,20 @@ require_cmd() {
   fi
 }
 
+ensure_sudo_ready() {
+  if ! sudo -n true 2>/dev/null; then
+    echo "This script needs sudo access to configure tc on loopback (lo)." >&2
+    echo "Please run it from an interactive terminal where sudo can prompt for your password," >&2
+    echo "or pre-authorize sudo before invoking the script." >&2
+    exit 1
+  fi
+}
+
 validate_port_range() {
   local port="$1"
-  local max_port_needed=$((port + 399))
+  local total_parties=$2
+  local case_stride=$((2 * total_parties * total_parties + 32))
+  local max_port_needed=$((port + 4 * case_stride - 1))
   if (( port < 1024 || max_port_needed > 65535 )); then
     echo "Invalid --base-port=${port}: this wrapper needs ports up to ${max_port_needed}, which must stay within 1024..65535." >&2
     exit 1
@@ -123,7 +134,11 @@ if [[ ! -x "${COMPARE_SCRIPT}" ]]; then
   exit 1
 fi
 
-validate_port_range "${BASE_PORT}"
+ensure_sudo_ready
+
+if [[ -n "${BASE_PORT}" ]]; then
+  validate_port_range "${BASE_PORT}" "$((N + 1))"
+fi
 
 if [[ -z "${LABEL}" ]]; then
   LABEL="bw_${BANDWIDTH}_owd_${ONE_WAY_DELAY_MS}ms_n${N}"
@@ -134,8 +149,6 @@ RAW_DIR="${RUN_DIR}/raw"
 mkdir -p "${RUN_DIR}"
 
 trap cleanup EXIT
-
-sudo -v
 
 echo "=== Configuring loopback tc: bandwidth=${BANDWIDTH}, one-way delay=${ONE_WAY_DELAY_MS}ms ==="
 set_tc "${ONE_WAY_DELAY_MS}"
@@ -154,14 +167,21 @@ PING_AVG_MS="$(measure_ping_avg_ms "${RUN_DIR}/ping.txt")"
   echo "batch_repeat=${BATCH_REPEAT}"
 } > "${RUN_DIR}/env.txt"
 
-"${COMPARE_SCRIPT}" \
-  -n "${N}" \
-  -b "${BATCH_SIZE}" \
-  --single-repeat "${SINGLE_REPEAT}" \
-  --batch-repeat "${BATCH_REPEAT}" \
-  -p "${BASE_PORT}" \
-  --label "${LABEL}" \
-  -o "${RAW_DIR}" | tee "${RUN_DIR}/compare_output.txt"
+compare_cmd=(
+  "${COMPARE_SCRIPT}"
+  -n "${N}"
+  -b "${BATCH_SIZE}"
+  --single-repeat "${SINGLE_REPEAT}"
+  --batch-repeat "${BATCH_REPEAT}"
+  --label "${LABEL}"
+  -o "${RAW_DIR}"
+)
+
+if [[ -n "${BASE_PORT}" ]]; then
+  compare_cmd+=(-p "${BASE_PORT}")
+fi
+
+"${compare_cmd[@]}" | tee "${RUN_DIR}/compare_output.txt"
 
 echo
 echo "[DONE] Truncation tc run saved to: ${RUN_DIR}"

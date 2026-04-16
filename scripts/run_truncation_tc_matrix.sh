@@ -11,7 +11,7 @@ PARTIES=(5 10 16)
 BATCH_SIZE=1000
 SINGLE_REPEAT=5
 BATCH_REPEAT=1
-BASE_PORT=50000
+BASE_PORT=""
 
 usage() {
   cat <<'EOF'
@@ -29,7 +29,7 @@ Options:
   -b, --batch-size <int>        Batch truncation size (default: 1000)
   --single-repeat <int>         Repetitions for single latency (default: 5)
   --batch-repeat <int>          Repetitions for batched case (default: 1)
-  --base-port <int>             Base port for the first condition (default: 50000)
+  --base-port <int>             Base port for the first condition (default: auto-pick per case)
   --out-dir <path>              Output directory (default: run_logs/truncation_tc_matrix)
   -h, --help                    Show help
 
@@ -44,10 +44,22 @@ csv_to_array() {
   IFS=',' read -r -a out_ref <<<"$raw"
 }
 
+ensure_sudo_ready() {
+  if ! sudo -n true 2>/dev/null; then
+    echo "This script delegates to run_truncation_tc.sh, which needs sudo access to configure tc on loopback (lo)." >&2
+    echo "Please run it from an interactive terminal where sudo can prompt for your password," >&2
+    echo "or pre-authorize sudo before invoking the matrix run." >&2
+    exit 1
+  fi
+}
+
 validate_port_range() {
   local start_port="$1"
   local num_cases=$2
-  local last_port=$((start_port + (num_cases - 1) * 1000 + 399))
+  local max_total_parties=$3
+  local case_stride=$((2 * max_total_parties * max_total_parties + 32))
+  local per_run_width=$((4 * case_stride))
+  local last_port=$((start_port + (num_cases - 1) * per_run_width + per_run_width - 1))
   if (( start_port < 1024 || last_port > 65535 )); then
     echo "Invalid --base-port=${start_port}: this matrix run needs ports up to ${last_port}, which must stay within 1024..65535." >&2
     exit 1
@@ -80,11 +92,25 @@ if [[ ! -x "${RUN_SCRIPT}" ]]; then
   exit 1
 fi
 
-num_cases=$(( ${#DELAYS_MS[@]} * ${#PARTIES[@]} ))
-validate_port_range "${BASE_PORT}" "${num_cases}"
+ensure_sudo_ready
+
+if [[ -n "${BASE_PORT}" ]]; then
+  num_cases=$(( ${#DELAYS_MS[@]} * ${#PARTIES[@]} ))
+  max_parties=0
+  for n in "${PARTIES[@]}"; do
+    if (( n > max_parties )); then
+      max_parties=$n
+    fi
+  done
+  validate_port_range "${BASE_PORT}" "${num_cases}" "$((max_parties + 1))"
+fi
 
 mkdir -p "${OUT_DIR}"
 current_port="${BASE_PORT}"
+if [[ -n "${BASE_PORT}" ]]; then
+  max_total_parties=$((max_parties + 1))
+  per_run_width=$((4 * (2 * max_total_parties * max_total_parties + 32)))
+fi
 
 for delay_ms in "${DELAYS_MS[@]}"; do
   delay_ms="${delay_ms%ms}"
@@ -93,18 +119,27 @@ for delay_ms in "${DELAYS_MS[@]}"; do
     run_dir="${OUT_DIR}/${label}"
 
     echo "=== Running truncation benchmark: delay=${delay_ms}ms, bandwidth=${BANDWIDTH}, n=${n} ==="
-    "${RUN_SCRIPT}" \
-      --delay "${delay_ms}" \
-      --bandwidth "${BANDWIDTH}" \
-      -n "${n}" \
-      -b "${BATCH_SIZE}" \
-      --single-repeat "${SINGLE_REPEAT}" \
-      --batch-repeat "${BATCH_REPEAT}" \
-      --base-port "${current_port}" \
-      --label "${label}" \
-      --out-dir "${OUT_DIR}" | tee "${run_dir}.log"
+    run_cmd=(
+      "${RUN_SCRIPT}"
+      --delay "${delay_ms}"
+      --bandwidth "${BANDWIDTH}"
+      -n "${n}"
+      -b "${BATCH_SIZE}"
+      --single-repeat "${SINGLE_REPEAT}"
+      --batch-repeat "${BATCH_REPEAT}"
+      --label "${label}"
+      --out-dir "${OUT_DIR}"
+    )
 
-    current_port=$((current_port + 1000))
+    if [[ -n "${BASE_PORT}" ]]; then
+      run_cmd+=(--base-port "${current_port}")
+    fi
+
+    "${run_cmd[@]}" | tee "${run_dir}.log"
+
+    if [[ -n "${BASE_PORT}" ]]; then
+      current_port=$((current_port + per_run_width))
+    fi
   done
 done
 

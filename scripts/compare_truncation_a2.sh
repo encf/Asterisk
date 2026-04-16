@@ -11,7 +11,7 @@ BATCH_REPEAT=1
 FRAC_BITS=8
 ELL_X=40
 SLACK=8
-BASE_PORT=54000
+BASE_PORT=""
 LABEL=""
 OUT_DIR="${ROOT_DIR}/run_logs/truncation_compare"
 
@@ -39,11 +39,101 @@ Options:
   --frac-bits <int>             Fractional bits m for truncation (default: 8)
   --ell-x <int>                 Truncation ell_x (default: 40)
   --slack <int>                 Truncation slack s (default: 8)
-  -p, --base-port <int>         Base port (default: 54000)
+  -p, --base-port <int>         Base port (default: auto-pick a free range)
   --label <text>                Optional scenario label for the summary output
   -o, --out-dir <path>          Output directory (default: run_logs/truncation_compare)
   -h, --help                    Show help
 EOF
+}
+
+compute_case_port_stride() {
+  local total_parties=$1
+  python3 - "$total_parties" <<'PY'
+import sys
+n_total = int(sys.argv[1])
+# NetIOMP uses ports up to:
+#   base + 2 * (i * nP + j) + 1
+# for the pair (i, j), so we reserve a full square plus a small cushion.
+print(2 * n_total * n_total + 32)
+PY
+}
+
+pick_free_base_port() {
+  local total_parties=$1
+  local width=$2
+  python3 - "$total_parties" "$width" <<'PY'
+import socket
+import sys
+
+START = 54000
+END = 65000
+WIDTH = int(sys.argv[2])
+STRIDE = WIDTH
+
+def range_is_free(base):
+    sockets = []
+    try:
+        for port in range(base, base + WIDTH):
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.bind(("127.0.0.1", port))
+            sockets.append(s)
+        return True
+    except OSError:
+        return False
+    finally:
+        for s in sockets:
+            s.close()
+
+for base in range(START, END - WIDTH + 1, STRIDE):
+    if range_is_free(base):
+        print(base)
+        break
+else:
+    raise SystemExit("Could not find a free port range for truncation benchmark")
+PY
+}
+
+ensure_base_port_available() {
+  local base_port="$1"
+  local width="$2"
+  python3 - "$base_port" "$width" <<'PY'
+import socket
+import sys
+
+base = int(sys.argv[1])
+width = int(sys.argv[2])
+if base < 1024 or base + width - 1 > 65535:
+    raise SystemExit(f"Invalid base port {base}: need a free range up to {base + width - 1} within 1024..65535")
+
+sockets = []
+try:
+    for port in range(base, base + width):
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.bind(("127.0.0.1", port))
+        sockets.append(s)
+except OSError as exc:
+    raise SystemExit(f"Base port {base} is not usable: {exc}")
+finally:
+    for s in sockets:
+        s.close()
+PY
+}
+
+wait_for_jobs() {
+  local -a jobs=("$@")
+  local remaining=${#jobs[@]}
+  while (( remaining > 0 )); do
+    if wait -n; then
+      remaining=$((remaining - 1))
+    else
+      local status=$?
+      for pid in "${jobs[@]}"; do
+        kill "${pid}" 2>/dev/null || true
+      done
+      wait "${jobs[@]}" 2>/dev/null || true
+      return "${status}"
+    fi
+  done
 }
 
 while [[ $# -gt 0 ]]; do
@@ -69,6 +159,15 @@ while [[ $# -gt 0 ]]; do
 done
 
 mkdir -p "${OUT_DIR}"
+TOTAL_PARTIES=$((N + 1))
+CASE_PORT_STRIDE="$(compute_case_port_stride "${TOTAL_PARTIES}")"
+TOTAL_PORT_WIDTH=$((4 * CASE_PORT_STRIDE))
+
+if [[ -z "${BASE_PORT}" ]]; then
+  BASE_PORT="$(pick_free_base_port "${TOTAL_PARTIES}" "${TOTAL_PORT_WIDTH}")"
+else
+  ensure_base_port_available "${BASE_PORT}" "${TOTAL_PORT_WIDTH}"
+fi
 
 if [[ ! -x "${BUILD_DIR}/benchmarks/asterisk2_mpc" ]]; then
   echo "Missing benchmark binary: ${BUILD_DIR}/benchmarks/asterisk2_mpc" >&2
@@ -99,20 +198,18 @@ run_case() {
     jobs+=("$!")
   done
 
-  for j in "${jobs[@]}"; do
-    wait "${j}"
-  done
+  wait_for_jobs "${jobs[@]}"
 }
 
 run_model() {
   local model="$1"
   local port_base="$2"
   run_case "${model}" single 1 "${SINGLE_REPEAT}" "${port_base}"
-  run_case "${model}" batch "${BATCH_SIZE}" "${BATCH_REPEAT}" "$((port_base + 100))"
+  run_case "${model}" batch "${BATCH_SIZE}" "${BATCH_REPEAT}" "$((port_base + CASE_PORT_STRIDE))"
 }
 
 run_model semi-honest "${BASE_PORT}"
-run_model malicious "$((BASE_PORT + 300))"
+run_model malicious "$((BASE_PORT + 2 * CASE_PORT_STRIDE))"
 
 python3 - "${OUT_DIR}" "${N}" "${BATCH_SIZE}" "${LABEL}" "${ELL_X}" "${FRAC_BITS}" "${SLACK}" "${SINGLE_REPEAT}" "${BATCH_REPEAT}" <<'PY'
 import json
