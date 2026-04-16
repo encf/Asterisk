@@ -33,6 +33,7 @@ void benchmark(const bpo::variables_map& opts) {
     auto seed = opts["seed"].as<size_t>();
     auto repeat = opts["repeat"].as<size_t>();
     auto port = opts["port"].as<int>();
+    auto fill_value = opts["fill-value"].as<int64_t>();
 
     std::shared_ptr<io::NetIOMP> network = nullptr;
     if (opts["localhost"].as<bool>()) {
@@ -91,44 +92,49 @@ void benchmark(const bpo::variables_map& opts) {
     for (const auto& g : VM_circ.gates_by_level[0]) {
         if (g->type == common::utils::GateType::kInp) {
             input_pid_map[g->out] = 1;
-            input_map[g->out] = 1;
+            input_map[g->out] = Field(fill_value);
         }
     }
 
     emp::PRG prg(&emp::zero_block, seed);
 
     for (size_t r = 0; r < repeat; ++r) {
-        StatsPoint start(*network);
-        
         // Offline
+        network->sync();
+        StatsPoint offline_start(*network);
         OfflineEvaluator VM_off_eval(nP, pid, network, VM_circ, security_param, threads, seed);
-
         auto VM_preproc = VM_off_eval.run(input_pid_map);
-
+        StatsPoint offline_end(*network);
         network->sync();
         
         //Online
+        StatsPoint online_start(*network);
         OnlineEvaluator VM_eval(nP, pid, network, std::move(VM_preproc), VM_circ, security_param, threads, seed);
+        (void)VM_eval.evaluateCircuit(input_map);
+        StatsPoint online_end(*network);
 
-        VM_eval.setRandomInputs();        
-
-        //auto VM_res = VM_eval.evaluateCircuit(input_map);
-        for (size_t i = 0; i < VM_circ.gates_by_level.size(); ++i) {
-            VM_eval.evaluateGatesAtDepth(i);
+        auto offline_bench = offline_end - offline_start;
+        auto online_bench = online_end - online_start;
+        size_t offline_bytes = 0;
+        for (const auto& val : offline_bench["communication"]) {
+            offline_bytes += val.get<int64_t>();
         }
-
-
-        StatsPoint end(*network);
-        auto rbench = end - start;
-        output_data["benchmarks"].push_back(rbench);
-        size_t bytes_sent = 0;
-        for (const auto& val : rbench["communication"]) {
-            bytes_sent += val.get<int64_t>();
+        size_t online_bytes = 0;
+        for (const auto& val : online_bench["communication"]) {
+            online_bytes += val.get<int64_t>();
         }
+        output_data["benchmarks"].push_back({
+            {"offline", offline_bench},
+            {"online", online_bench},
+            {"offline_bytes", offline_bytes},
+            {"online_bytes", online_bytes},
+        });
 
         std::cout << "--- Repetition " << r + 1 << " ---\n";
-        std::cout << "time: " << rbench["time"] << " ms\n";
-        std::cout << "sent: " << bytes_sent << " bytes\n";
+        std::cout << "offline time: " << offline_bench["time"] << " ms\n";
+        std::cout << "offline sent: " << offline_bytes << " bytes\n";
+        std::cout << "online time: " << online_bench["time"] << " ms\n";
+        std::cout << "online sent: " << online_bytes << " bytes\n";
 
         if (save_output) {
             saveJson(output_data, save_file);
@@ -150,6 +156,8 @@ bpo::options_description programOptions() {
         ("security-param", bpo::value<size_t>()->default_value(128), "Security parameter in bits.")
         ("threads,t", bpo::value<size_t>()->default_value(6), "Number of threads (recommended 6).")
         ("seed", bpo::value<size_t>()->default_value(200), "Value of the random seed.")
+        ("fill-value", bpo::value<int64_t>()->default_value(1),
+         "Deterministic value assigned to every input wire (default: 1).")
         ("net-config", bpo::value<std::string>(), "Path to JSON file containing network details of all parties.")
         ("localhost", bpo::bool_switch(), "All parties are on same machine.")
         ("port", bpo::value<int>()->default_value(10000), "Base port for networking.")

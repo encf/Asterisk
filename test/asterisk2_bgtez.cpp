@@ -172,6 +172,83 @@ std::tuple<std::vector<Field>, std::vector<Field>, std::vector<Field>> run_bgtez
   }
   return {g, dg, delta};
 }
+
+std::vector<Field> run_eqz_once(int x_clear, size_t lx, size_t s, int base_port,
+                                asterisk2::BGTEZStats* stat_out = nullptr) {
+  common::utils::Circuit<Field> empty;
+  auto level = empty.orderGatesByLevel();
+  NTL::ZZ_pContext ctx;
+  ctx.save();
+  std::vector<std::future<std::pair<Field, asterisk2::BGTEZStats>>> parties;
+  for (int pid = 0; pid <= nP; ++pid) {
+    parties.push_back(std::async(std::launch::async, [=, &ctx]() {
+      ctx.restore();
+      auto net = std::make_shared<io::NetIOMP>(pid, nP + 1, base_port, nullptr, true);
+      asterisk2::Protocol p(nP, pid, net, level, 200);
+      Field share = (pid == 0) ? Field(x_clear) : Field(0);
+      asterisk2::BGTEZStats st;
+      auto off = p.eqz_offline(lx, s);
+      Field out = p.eqz_online(share, off, &st);
+      return std::make_pair(out, st);
+    }));
+  }
+
+  std::vector<Field> out(nP + 1, Field(0));
+  for (int pid = 0; pid <= nP; ++pid) {
+    auto [val, st] = parties[pid].get();
+    out[pid] = val;
+    if (stat_out != nullptr && pid == 0) {
+      *stat_out = st;
+    }
+  }
+  return out;
+}
+
+std::tuple<std::vector<Field>, std::vector<Field>, std::vector<Field>> run_eqz_malicious_once(
+    int x_clear, size_t lx, size_t s, int base_port) {
+  common::utils::Circuit<Field> circ;
+  auto w0 = circ.newInputWire();
+  auto level = circ.orderGatesByLevel();
+  NTL::ZZ_pContext ctx;
+  ctx.save();
+  std::vector<std::future<std::tuple<Field, Field, Field>>> parties;
+  for (int pid = 0; pid <= nP; ++pid) {
+    parties.push_back(std::async(std::launch::async, [=, &ctx]() {
+      ctx.restore();
+      auto net = std::make_shared<io::NetIOMP>(pid, nP + 1, base_port, nullptr, true);
+      asterisk2::ProtocolConfig cfg;
+      cfg.security_model = asterisk2::SecurityModel::kMalicious;
+      asterisk2::Protocol p(nP, pid, net, level, 200, cfg);
+      auto mul_off = p.mul_offline();
+      net->sync();
+
+      std::unordered_map<common::utils::wire_t, Field> inputs;
+      inputs[w0] = (pid == 0) ? Field(x_clear) : Field(0);
+      auto auth_in = p.maliciousInputShareForTesting(inputs, mul_off);
+      Field x_share = Field(0);
+      Field dx_share = Field(0);
+      auto off = p.eqz_offline_malicious(lx, s);
+      if (pid < nP) {
+        x_share = auth_in.x_shares.at(w0);
+        dx_share = auth_in.delta_x_shares.at(w0);
+      }
+      auto out = p.eqz_online_malicious(x_share, dx_share, off);
+      return std::make_tuple(out.eqz_share, out.delta_eqz_share, off.nonneg_data.delta_share);
+    }));
+  }
+
+  std::vector<Field> g(nP + 1, Field(0));
+  std::vector<Field> dg(nP + 1, Field(0));
+  std::vector<Field> delta(nP + 1, Field(0));
+  for (int pid = 0; pid <= nP; ++pid) {
+    auto [gi, dgi, di] = parties[pid].get();
+    g[pid] = gi;
+    dg[pid] = dgi;
+    delta[pid] = di;
+  }
+  return {g, dg, delta};
+}
+
 }  // namespace
 
 BOOST_AUTO_TEST_CASE(batched_vs_serial_equivalence) {
@@ -287,6 +364,29 @@ BOOST_AUTO_TEST_CASE(compare_online_requires_offline_data) {
   }
 }
 
+BOOST_AUTO_TEST_CASE(end_to_end_eqz_correctness) {
+  constexpr size_t lx = 16;
+  constexpr size_t s = 8;
+  for (int x : {-200, -1, 0, 1, 123, 32767}) {
+    auto shares = run_eqz_once(x, lx, s, fresh_port());
+    Field rec = Field(0);
+    for (int pid = 0; pid < nP; ++pid) {
+      rec += shares[pid];
+    }
+    const int got = NTL::conv<uint64_t>(NTL::rep(rec)) % 2;
+    const int expect = (x == 0) ? 1 : 0;
+    BOOST_TEST(got == expect);
+  }
+}
+
+BOOST_AUTO_TEST_CASE(eqz_uses_single_batched_open_for_two_ltzs) {
+  constexpr size_t lx = 16;
+  constexpr size_t s = 8;
+  asterisk2::BGTEZStats stats;
+  (void)run_eqz_once(0, lx, s, fresh_port(), &stats);
+  BOOST_TEST(stats.batched_open_calls == 1u);
+}
+
 BOOST_AUTO_TEST_CASE(malicious_compare_authenticated_correctness) {
   constexpr size_t lx = 16;
   constexpr size_t s = 8;
@@ -305,6 +405,27 @@ BOOST_AUTO_TEST_CASE(malicious_compare_authenticated_correctness) {
     const int expect = (x >= 0) ? 1 : 0;
     BOOST_TEST(got == expect);
     BOOST_TEST(dg == delta * g);
+  }
+}
+
+BOOST_AUTO_TEST_CASE(malicious_eqz_authenticated_correctness) {
+  constexpr size_t lx = 16;
+  constexpr size_t s = 8;
+  for (int x : {-200, -1, 0, 1, 123, 32767}) {
+    auto [eqz_shares, deqz_shares, delta_shares] =
+        run_eqz_malicious_once(x, lx, s, fresh_port());
+    Field eqz = Field(0);
+    Field deqz = Field(0);
+    Field delta = Field(0);
+    for (int pid = 0; pid < nP; ++pid) {
+      eqz += eqz_shares[pid];
+      deqz += deqz_shares[pid];
+      delta += delta_shares[pid];
+    }
+    const int got = NTL::conv<uint64_t>(NTL::rep(eqz)) % 2;
+    const int expect = (x == 0) ? 1 : 0;
+    BOOST_TEST(got == expect);
+    BOOST_TEST(deqz == delta * eqz);
   }
 }
 

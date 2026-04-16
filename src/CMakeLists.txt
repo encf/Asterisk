@@ -4,6 +4,7 @@ add_library(Asterisk
     utils/helpers.cpp
     Asterisk2.0/key_manager.cpp
     Asterisk2.0/mac_setup.cpp
+    Asterisk2.0/app_evaluator.cpp
     Asterisk2.0/protocol.cpp
     asterisk/sharing.cpp
     asterisk/rand_gen_pool.cpp

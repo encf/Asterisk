@@ -81,6 +81,7 @@ struct CompareMaskData {
 struct CompareOfflineData {
   BatchedTruncOfflineData trunc_data;
   CompareMaskData cmp_data;
+  uint64_t domain_sep{0};
   bool ready{false};
 };
 
@@ -93,12 +94,37 @@ struct CompareOfflineDataMalicious {
   std::vector<Field> delta_r0_share;
   Field delta_share{Field(0)};
   CompareMaskData cmp_data;
+  uint64_t domain_sep{0};
   bool ready{false};
 };
 
 struct AuthCompareResult {
   Field gtez_share{Field(0)};
   Field delta_gtez_share{Field(0)};
+};
+
+struct AuthMulResult {
+  Field share{Field(0)};
+  Field delta_share{Field(0)};
+};
+
+struct EqzOfflineData {
+  CompareOfflineData nonneg_data;
+  CompareOfflineData nonpos_data;
+  uint64_t domain_sep{0};
+  bool ready{false};
+};
+
+struct EqzOfflineDataMalicious {
+  CompareOfflineDataMalicious nonneg_data;
+  CompareOfflineDataMalicious nonpos_data;
+  uint64_t domain_sep{0};
+  bool ready{false};
+};
+
+struct AuthEqzResult {
+  Field eqz_share{Field(0)};
+  Field delta_eqz_share{Field(0)};
 };
 
 enum class SecurityModel {
@@ -148,14 +174,35 @@ class Protocol {
                                          const TruncOfflineData& offline_data);
   CompareOfflineData compare_offline(size_t lx, size_t s,
                                      bool force_t = false, bool forced_t_value = false);
+  CompareOfflineData compare_offline_tagged(size_t lx, size_t s, uint64_t domain_sep,
+                                            bool force_t = false,
+                                            bool forced_t_value = false);
   Field compare_online(const Field& x_share, const CompareOfflineData& offline_data,
                        BGTEZStats* stats = nullptr);
+  EqzOfflineData eqz_offline(size_t lx, size_t s);
+  EqzOfflineData eqz_offline_tagged(size_t lx, size_t s, uint64_t domain_sep);
+  Field eqz_online(const Field& x_share, const EqzOfflineData& offline_data,
+                   BGTEZStats* stats = nullptr);
   CompareOfflineDataMalicious compare_offline_malicious(size_t lx, size_t s,
                                                         bool force_t = false,
                                                         bool forced_t_value = false);
+  CompareOfflineDataMalicious compare_offline_malicious_tagged(size_t lx, size_t s,
+                                                               uint64_t domain_sep,
+                                                               bool force_t = false,
+                                                               bool forced_t_value = false);
   AuthCompareResult compare_online_malicious(
       const Field& x_share, const Field& delta_x_share,
       const CompareOfflineDataMalicious& offline_data);
+  AuthMulResult mul_online_malicious_single(
+      const Field& x_share, const Field& delta_x_share,
+      const Field& y_share, const Field& delta_y_share,
+      const MulOfflineData& offline_data);
+  EqzOfflineDataMalicious eqz_offline_malicious(size_t lx, size_t s);
+  EqzOfflineDataMalicious eqz_offline_malicious_tagged(size_t lx, size_t s,
+                                                       uint64_t domain_sep);
+  AuthEqzResult eqz_online_malicious(
+      const Field& x_share, const Field& delta_x_share,
+      const EqzOfflineDataMalicious& offline_data);
 
   std::vector<TripleShare> offline();
 
@@ -190,6 +237,12 @@ class Protocol {
   MaliciousInputShareData buildMaliciousInputShares(
       const std::unordered_map<wire_t, Field>& inputs, const MulOfflineData& offline_data);
   void verifyMaliciousKeyMaterial(const MulOfflineData& offline_data) const;
+  CompareOfflineData compare_offline_internal(size_t lx, size_t s, bool force_t,
+                                              bool forced_t_value, uint64_t domain_sep);
+  CompareOfflineDataMalicious compare_offline_malicious_internal(size_t lx, size_t s,
+                                                                 bool force_t,
+                                                                 bool forced_t_value,
+                                                                 uint64_t domain_sep);
   std::vector<std::vector<Field>> recvFieldVectorsFromPeers(const std::vector<int>& peers,
                                                             size_t len) const;
   void sendFieldVectorToPeers(const std::vector<int>& peers, const std::vector<Field>& data) const;
