@@ -114,7 +114,7 @@ run_model() {
 run_model semi-honest "${BASE_PORT}"
 run_model malicious "$((BASE_PORT + 300))"
 
-python - "${OUT_DIR}" "${N}" "${BATCH_SIZE}" "${LABEL}" "${ELL_X}" "${FRAC_BITS}" "${SLACK}" "${SINGLE_REPEAT}" "${BATCH_REPEAT}" <<'PY'
+python3 - "${OUT_DIR}" "${N}" "${BATCH_SIZE}" "${LABEL}" "${ELL_X}" "${FRAC_BITS}" "${SLACK}" "${SINGLE_REPEAT}" "${BATCH_REPEAT}" <<'PY'
 import json
 import pathlib
 import statistics
