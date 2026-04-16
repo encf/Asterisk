@@ -198,6 +198,109 @@ tc qdisc show dev eth0
 - `--frac-bits`：截断的小数位数 m
 - `--ell-x`、`--slack`：截断参数
 
+### 11) 独立截断（standalone truncation）benchmark 脚本
+新增脚本：`scripts/compare_truncation_a2.sh`，用于单独测量 Asterisk2.0 的 arithmetic-domain probabilistic truncation，对比：
+- Asterisk2.0 semi-honest
+- Asterisk2.0 malicious
+
+输出指标：
+- single truncation latency（ms）
+- offline communication（MB）
+- offline time（s）
+- online communication（MB）
+- max per-party online communication（MB）
+- online time（s）
+
+使用前说明：
+- 该脚本假设你已经按上面的 `tc/netem` 流程配置好了目标网络环境。
+- 脚本本身不会修改网络配置，只负责编译并运行 truncation benchmark。
+- 当前 benchmark 输入模型固定为：`party 0 = 5`，其余计算方输入为 `0`；这不会影响 communication/time 的 reviewer 复现实验。
+
+```sh
+# 示例 1：在当前网络配置下，跑 n=5 的 standalone truncation benchmark
+./scripts/compare_truncation_a2.sh -n 5 --label owd20ms_n5
+
+# 示例 2：批量切换参与方数量
+./scripts/compare_truncation_a2.sh -n 10 --label owd20ms_n10
+./scripts/compare_truncation_a2.sh -n 16 --label owd20ms_n16
+
+# 查看所有可调参数
+./scripts/compare_truncation_a2.sh --help
+```
+
+如果你要复现论文中的两组单向时延设置，可按下面顺序执行。
+
+20 ms one-way delay, 100 Mbps:
+```sh
+sudo tc qdisc replace dev eth0 root handle 1: netem delay 20ms
+sudo tc qdisc replace dev eth0 parent 1: handle 10: tbf rate 100mbit burst 64kb latency 50ms
+
+./scripts/compare_truncation_a2.sh -n 5 --label owd20ms_n5
+./scripts/compare_truncation_a2.sh -n 10 --label owd20ms_n10
+./scripts/compare_truncation_a2.sh -n 16 --label owd20ms_n16
+```
+
+50 ms one-way delay, 100 Mbps:
+```sh
+sudo tc qdisc replace dev eth0 root handle 1: netem delay 50ms
+sudo tc qdisc replace dev eth0 parent 1: handle 10: tbf rate 100mbit burst 64kb latency 50ms
+
+./scripts/compare_truncation_a2.sh -n 5 --label owd50ms_n5
+./scripts/compare_truncation_a2.sh -n 10 --label owd50ms_n10
+./scripts/compare_truncation_a2.sh -n 16 --label owd50ms_n16
+```
+
+恢复默认网络配置：
+```sh
+sudo tc qdisc del dev eth0 root 2>/dev/null || true
+tc qdisc show dev eth0
+```
+
+输出文件：
+- 原始 party JSON：`run_logs/truncation_compare/<security-model>/<single|batch>/`
+- 汇总结果：`run_logs/truncation_compare/summary.json`
+
+参数说明：
+- `-n/--num-parties`：计算方数量
+- `-b/--batch-size`：批量 truncation 数量，默认 `1000`
+- `--single-repeat`：单次 truncation latency 的重复次数，默认 `5`
+- `--batch-repeat`：batch truncation 的重复次数，默认 `1`
+- `-r/--repeat`：把 single 和 batch 的重复次数设成同一个值
+- `--frac-bits`：截断的小数位数 `m`
+- `--ell-x`、`--slack`：截断参数
+- `--label`：给当前实验场景添加标签，便于保存结果和论文回填
+
+### 12) 一键配置 loopback 网络并运行截断 benchmark
+新增脚本：`scripts/run_truncation_tc.sh`，会自动：
+- 在 `lo` 上配置 `tc/netem`
+- 保存 `tc qdisc`、`ping` 和实验参数快照
+- 调用 `scripts/compare_truncation_a2.sh`
+- 默认把 batch benchmark 固定成只跑 `1` 次
+
+这适合论文里的 localhost 多进程复现实验，因为 `--localhost` 模式下流量走的是 loopback，不是 `eth0`。
+
+```sh
+# 20 ms one-way delay, 100 Mbps, n=5
+./scripts/run_truncation_tc.sh --delay 20 --bandwidth 100mbit -n 5 --label owd20ms_n5
+
+# 50 ms one-way delay, 100 Mbps, n=16
+./scripts/run_truncation_tc.sh --delay 50 --bandwidth 100mbit -n 16 --label owd50ms_n16
+
+# 查看参数
+./scripts/run_truncation_tc.sh --help
+```
+
+输出文件：
+- 运行目录：`run_logs/truncation_tc/<label>/`
+- 网络快照：`tc_qdisc.txt`、`ping.txt`、`env.txt`
+- benchmark 标准输出：`compare_output.txt`
+- 原始 JSON：`raw/`
+
+如果你需要保留最后一次 `tc` 配置不自动清理，可加：
+```sh
+./scripts/run_truncation_tc.sh --delay 20 --keep-tc
+```
+
 ## External Dependencies
 The following libraries need to be installed separately and should be available to the build system and compiler.
 

@@ -6,7 +6,8 @@ BUILD_DIR="${ROOT_DIR}/build"
 
 N=3
 BATCH_SIZE=1000
-REPEAT=5
+SINGLE_REPEAT=5
+BATCH_REPEAT=1
 FRAC_BITS=8
 ELL_X=40
 SLACK=8
@@ -32,7 +33,9 @@ Measurements:
 Options:
   -n, --num-parties <int>       Number of computing parties (default: 3)
   -b, --batch-size <int>        Number of truncations in the batch benchmark (default: 1000)
-  -r, --repeat <int>            Number of repetitions per benchmark case (default: 5)
+  --single-repeat <int>         Repetitions for the single-latency case (default: 5)
+  --batch-repeat <int>          Repetitions for the batched case (default: 1)
+  -r, --repeat <int>            Set both single-repeat and batch-repeat to the same value
   --frac-bits <int>             Fractional bits m for truncation (default: 8)
   --ell-x <int>                 Truncation ell_x (default: 40)
   --slack <int>                 Truncation slack s (default: 8)
@@ -47,7 +50,13 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     -n|--num-parties) N="$2"; shift 2 ;;
     -b|--batch-size) BATCH_SIZE="$2"; shift 2 ;;
-    -r|--repeat) REPEAT="$2"; shift 2 ;;
+    --single-repeat) SINGLE_REPEAT="$2"; shift 2 ;;
+    --batch-repeat) BATCH_REPEAT="$2"; shift 2 ;;
+    -r|--repeat)
+      SINGLE_REPEAT="$2"
+      BATCH_REPEAT="$2"
+      shift 2
+      ;;
     --frac-bits) FRAC_BITS="$2"; shift 2 ;;
     --ell-x) ELL_X="$2"; shift 2 ;;
     --slack) SLACK="$2"; shift 2 ;;
@@ -94,14 +103,14 @@ run_case() {
 run_model() {
   local model="$1"
   local port_base="$2"
-  run_case "${model}" single 1 "${REPEAT}" "${port_base}"
-  run_case "${model}" batch "${BATCH_SIZE}" "${REPEAT}" "$((port_base + 100))"
+  run_case "${model}" single 1 "${SINGLE_REPEAT}" "${port_base}"
+  run_case "${model}" batch "${BATCH_SIZE}" "${BATCH_REPEAT}" "$((port_base + 100))"
 }
 
 run_model semi-honest "${BASE_PORT}"
 run_model malicious "$((BASE_PORT + 300))"
 
-python - "${OUT_DIR}" "${N}" "${BATCH_SIZE}" "${LABEL}" "${ELL_X}" "${FRAC_BITS}" "${SLACK}" <<'PY'
+python - "${OUT_DIR}" "${N}" "${BATCH_SIZE}" "${LABEL}" "${ELL_X}" "${FRAC_BITS}" "${SLACK}" "${SINGLE_REPEAT}" "${BATCH_REPEAT}" <<'PY'
 import json
 import pathlib
 import statistics
@@ -114,6 +123,8 @@ label = sys.argv[4]
 ell_x = int(sys.argv[5])
 frac_bits = int(sys.argv[6])
 slack = int(sys.argv[7])
+single_repeat = int(sys.argv[8])
+batch_repeat = int(sys.argv[9])
 MB = 1024 * 1024
 
 def load_case(model, case_tag):
@@ -167,6 +178,8 @@ summary = {
         "ell_x": ell_x,
         "frac_bits": frac_bits,
         "slack": slack,
+        "single_repeat": single_repeat,
+        "batch_repeat": batch_repeat,
         "benchmark_input_model": "party0=5, other parties=0 (fixed in asterisk2_mpc)",
     },
     "semi_honest": {
