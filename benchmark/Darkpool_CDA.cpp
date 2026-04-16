@@ -33,6 +33,9 @@ void benchmark(const bpo::variables_map& opts) {
     auto seed = opts["seed"].as<size_t>();
     auto repeat = opts["repeat"].as<size_t>();
     auto port = opts["port"].as<int>();
+    auto new_order_name = opts["new-order-name"].as<int64_t>();
+    auto new_order_unit = opts["new-order-unit"].as<int64_t>();
+    auto new_order_price = opts["new-order-price"].as<int64_t>();
 
     std::shared_ptr<io::NetIOMP> network = nullptr;
     if (opts["localhost"].as<bool>()) {
@@ -66,7 +69,10 @@ void benchmark(const bpo::variables_map& opts) {
                                 {"security_param", security_param},
                                 {"threads", threads},
                                 {"seed", seed},
-                                {"repeat", repeat}};
+                                {"repeat", repeat},
+                                {"new_order_name", new_order_name},
+                                {"new_order_unit", new_order_unit},
+                                {"new_order_price", new_order_price}};
     output_data["benchmarks"] = json::array();
 
     std::cout << "--- Details ---\n";
@@ -89,55 +95,70 @@ void benchmark(const bpo::variables_map& opts) {
     std::unordered_map<common::utils::wire_t, int> input_pid_map;
     std::unordered_map<common::utils::wire_t, Field> input_map;
 
-    for (const auto& g : CDA_circ.gates_by_level[0]) {
-        if (g->type == common::utils::GateType::kInp) {
-            input_pid_map[g->out] = 1;
-            // input_map[g->out] = 1;
+    std::vector<Field> ordered_values = {
+        Field(new_order_name),
+        Field(new_order_unit),
+        Field(new_order_price),
+    };
+    size_t input_idx = 0;
+    for (const auto& level : CDA_circ.gates_by_level) {
+        for (const auto& g : level) {
+            if (g->type == common::utils::GateType::kInp) {
+                if (input_idx >= ordered_values.size()) {
+                    throw std::runtime_error("CDA circuit exposes more input wires than expected");
+                }
+                input_pid_map[g->out] = 1;
+                input_map[g->out] = ordered_values[input_idx];
+                ++input_idx;
+            }
         }
     }
-
-    emp::PRG prg(&emp::zero_block, seed);
+    if (input_idx != ordered_values.size()) {
+        throw std::runtime_error("CDA circuit input count does not match the expected 3 manual inputs");
+    }
 
     for (size_t r = 0; r < repeat; ++r) {
         
-        StatsPoint start(*network);
+        network->sync();
+        StatsPoint offline_start(*network);
         // Offline 
         OfflineEvaluator CDA_off_eval(nP, pid, network, CDA_circ, security_param, threads, seed);
-
         auto CDA_preproc = CDA_off_eval.run(input_pid_map);
-        
+        StatsPoint offline_end(*network);
+        network->sync();
+
         // Online
+        StatsPoint online_start(*network);
         OnlineEvaluator CDA_eval(nP, pid, network, std::move(CDA_preproc), CDA_circ, 
                                                                   security_param, threads, seed);
-        CDA_eval.setRandomInputs();
-        
-        // auto CDA_res = CDA_eval.evaluateCircuit(input_map);
-        for (size_t i = 0; i < CDA_circ.gates_by_level.size(); ++i) {
-            CDA_eval.evaluateGatesAtDepth(i);
-        }
+        (void)CDA_eval.evaluateCircuit(input_map);
+        StatsPoint online_end(*network);
 
-        StatsPoint end(*network);
-        auto rbench = end - start;
-        output_data["benchmarks"].push_back(rbench);
-        size_t bytes_sent = 0;
-        for (const auto& val : rbench["communication"]) {
-            bytes_sent += val.get<int64_t>();
+        auto offline_bench = offline_end - offline_start;
+        auto online_bench = online_end - online_start;
+        size_t offline_bytes = 0;
+        for (const auto& val : offline_bench["communication"]) {
+            offline_bytes += val.get<int64_t>();
         }
+        size_t online_bytes = 0;
+        for (const auto& val : online_bench["communication"]) {
+            online_bytes += val.get<int64_t>();
+        }
+        output_data["benchmarks"].push_back({
+            {"offline", offline_bench},
+            {"online", online_bench},
+            {"offline_bytes", offline_bytes},
+            {"online_bytes", online_bytes},
+        });
 
         std::cout << "--- Repetition " << r + 1 << " ---\n";
-        std::cout << "time: " << rbench["time"] << " ms\n";
-        std::cout << "sent: " << bytes_sent << " bytes\n";
+        std::cout << "offline time: " << offline_bench["time"] << " ms\n";
+        std::cout << "offline sent: " << offline_bytes << " bytes\n";
+        std::cout << "online time: " << online_bench["time"] << " ms\n";
+        std::cout << "online sent: " << online_bytes << " bytes\n";
 
         std::cout << std::endl;
     }
-    output_data["stats"] = {{"peak_virtual_memory", peakVirtualMemory()},
-                            {"peak_resident_set_size", peakResidentSetSize()}};
-
-    std::cout << "--- Statistics ---\n";
-    for (const auto& [key, value] : output_data["stats"].items()) {
-        std::cout << key << ": " << value << "\n";
-    }
-    std::cout << std::endl;
 
     if (save_output) {
         saveJson(output_data, save_file);
@@ -156,6 +177,12 @@ bpo::options_description programOptions() {
         ("security-param", bpo::value<size_t>()->default_value(128), "Security parameter in bits.")
         ("threads,t", bpo::value<size_t>()->default_value(1), "Number of threads (recommended 6).")
         ("seed", bpo::value<size_t>()->default_value(200), "Value of the random seed.")
+        ("new-order-name", bpo::value<int64_t>()->default_value(1),
+         "Deterministic value for the new order name wire.")
+        ("new-order-unit", bpo::value<int64_t>()->default_value(1),
+         "Deterministic value for the new order unit wire.")
+        ("new-order-price", bpo::value<int64_t>()->default_value(1),
+         "Deterministic value for the new order price wire.")
         ("net-config", bpo::value<std::string>(), "Path to JSON file containing network details of all parties.")
         ("localhost", bpo::bool_switch(), "All parties are on same machine.")
         ("port", bpo::value<int>()->default_value(10000), "Base port for networking.")
