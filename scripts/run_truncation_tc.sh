@@ -14,6 +14,7 @@ BATCH_REPEAT=1
 BASE_PORT=""
 PING_COUNT=5
 CLEAR_TC_ON_EXIT=1
+SKIP_TC=0
 LABEL=""
 
 usage() {
@@ -37,6 +38,7 @@ Options:
   --ping-count <int>            ping probes used after tc setup (default: 5)
   --label <text>                Optional label for saved outputs
   --out-dir <path>              Output directory (default: run_logs/truncation_tc)
+  --skip-tc                     Do not modify tc/ping; run on the current local network as-is
   --keep-tc                     Keep the final tc rule instead of clearing it on exit
   -h, --help                    Show help
 
@@ -101,7 +103,7 @@ PY
 }
 
 cleanup() {
-  if [[ "${CLEAR_TC_ON_EXIT}" -eq 1 ]]; then
+  if [[ "${SKIP_TC}" -eq 0 && "${CLEAR_TC_ON_EXIT}" -eq 1 ]]; then
     clear_tc
   fi
 }
@@ -118,23 +120,28 @@ while [[ $# -gt 0 ]]; do
     --ping-count) PING_COUNT="$2"; shift 2 ;;
     --label) LABEL="$2"; shift 2 ;;
     --out-dir) OUT_DIR="$2"; shift 2 ;;
+    --skip-tc) SKIP_TC=1; shift ;;
     --keep-tc) CLEAR_TC_ON_EXIT=0; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage; exit 1 ;;
   esac
 done
 
-require_cmd sudo
-require_cmd tc
-require_cmd ping
 require_cmd python3
+if [[ "${SKIP_TC}" -eq 0 ]]; then
+  require_cmd sudo
+  require_cmd tc
+  require_cmd ping
+fi
 
 if [[ ! -x "${COMPARE_SCRIPT}" ]]; then
   echo "Expected executable compare script at ${COMPARE_SCRIPT}" >&2
   exit 1
 fi
 
-ensure_sudo_ready
+if [[ "${SKIP_TC}" -eq 0 ]]; then
+  ensure_sudo_ready
+fi
 
 if [[ -n "${BASE_PORT}" ]]; then
   validate_port_range "${BASE_PORT}" "$((N + 1))"
@@ -150,22 +157,39 @@ mkdir -p "${RUN_DIR}"
 
 trap cleanup EXIT
 
-echo "=== Configuring loopback tc: bandwidth=${BANDWIDTH}, one-way delay=${ONE_WAY_DELAY_MS}ms ==="
-set_tc "${ONE_WAY_DELAY_MS}"
-show_tc | tee "${RUN_DIR}/tc_qdisc.txt"
+if [[ "${SKIP_TC}" -eq 0 ]]; then
+  echo "=== Configuring loopback tc: bandwidth=${BANDWIDTH}, one-way delay=${ONE_WAY_DELAY_MS}ms ==="
+  set_tc "${ONE_WAY_DELAY_MS}"
+  show_tc | tee "${RUN_DIR}/tc_qdisc.txt"
 
-PING_AVG_MS="$(measure_ping_avg_ms "${RUN_DIR}/ping.txt")"
-{
-  echo "interface=lo"
-  echo "bandwidth=${BANDWIDTH}"
-  echo "one_way_delay_ms=${ONE_WAY_DELAY_MS}"
-  echo "approx_rtt_ms=$((ONE_WAY_DELAY_MS * 2))"
-  echo "measured_ping_avg_ms=${PING_AVG_MS}"
-  echo "num_parties=${N}"
-  echo "batch_size=${BATCH_SIZE}"
-  echo "single_repeat=${SINGLE_REPEAT}"
-  echo "batch_repeat=${BATCH_REPEAT}"
-} > "${RUN_DIR}/env.txt"
+  PING_AVG_MS="$(measure_ping_avg_ms "${RUN_DIR}/ping.txt")"
+  {
+    echo "network_mode=tc_lo"
+    echo "interface=lo"
+    echo "bandwidth=${BANDWIDTH}"
+    echo "one_way_delay_ms=${ONE_WAY_DELAY_MS}"
+    echo "approx_rtt_ms=$((ONE_WAY_DELAY_MS * 2))"
+    echo "measured_ping_avg_ms=${PING_AVG_MS}"
+    echo "num_parties=${N}"
+    echo "batch_size=${BATCH_SIZE}"
+    echo "single_repeat=${SINGLE_REPEAT}"
+    echo "batch_repeat=${BATCH_REPEAT}"
+  } > "${RUN_DIR}/env.txt"
+else
+  echo "=== Skipping tc configuration; running on the current local network ==="
+  {
+    echo "network_mode=unchanged_local"
+    echo "interface=lo"
+    echo "bandwidth=unchanged"
+    echo "one_way_delay_ms=unchanged"
+    echo "approx_rtt_ms=unchanged"
+    echo "measured_ping_avg_ms=NA"
+    echo "num_parties=${N}"
+    echo "batch_size=${BATCH_SIZE}"
+    echo "single_repeat=${SINGLE_REPEAT}"
+    echo "batch_repeat=${BATCH_REPEAT}"
+  } > "${RUN_DIR}/env.txt"
+fi
 
 compare_cmd=(
   "${COMPARE_SCRIPT}"

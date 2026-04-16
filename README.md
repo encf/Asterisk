@@ -213,7 +213,8 @@ tc qdisc show dev eth0
 
 使用前说明：
 - 该脚本假设你已经按上面的 `tc/netem` 流程配置好了目标网络环境。
-- 脚本本身不会修改网络配置，只负责编译并运行 truncation benchmark。
+- 脚本本身不会修改网络配置，只负责运行 truncation benchmark。
+- 运行前请先确认 `./build/benchmarks/asterisk2_mpc` 已经编译完成。
 - 当前 benchmark 输入模型固定为：`party 0 = 5`，其余计算方输入为 `0`；这不会影响 communication/time 的 reviewer 复现实验。
 
 ```sh
@@ -299,6 +300,38 @@ tc qdisc show dev eth0
 如果你需要保留最后一次 `tc` 配置不自动清理，可加：
 ```sh
 ./scripts/run_truncation_tc.sh --delay 20 --keep-tc
+```
+
+### 13) 一条命令跑完整截断矩阵
+新增脚本：`scripts/run_truncation_tc_matrix.sh`，默认会自动覆盖论文当前使用的 6 个 case：
+- `delay=20 ms`, `n=5`
+- `delay=20 ms`, `n=10`
+- `delay=20 ms`, `n=16`
+- `delay=50 ms`, `n=5`
+- `delay=50 ms`, `n=10`
+- `delay=50 ms`, `n=16`
+
+默认配置下：
+- bandwidth 固定为 `100mbit`
+- single truncation latency 重复 `5` 次
+- batch truncation 默认只跑 `1` 次
+
+```sh
+# 直接跑完整论文矩阵
+./scripts/run_truncation_tc_matrix.sh
+
+# 查看参数
+./scripts/run_truncation_tc_matrix.sh --help
+```
+
+输出目录：
+- 总目录：`run_logs/truncation_tc_matrix/`
+- 每个 case 的结果目录：`run_logs/truncation_tc_matrix/owd<delay>ms_n<n>/`
+- 每个 case 的 wrapper 日志：`run_logs/truncation_tc_matrix/owd<delay>ms_n<n>.log`
+
+如果你只想跑其中一部分，也可以改列表参数：
+```sh
+./scripts/run_truncation_tc_matrix.sh --delays 20 --parties 5,10
 ```
 
 ## External Dependencies

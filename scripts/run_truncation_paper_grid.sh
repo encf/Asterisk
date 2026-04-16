@@ -11,6 +11,7 @@ PARTIES=(5 10 16)
 BATCH_SIZE=1000
 SINGLE_REPEAT=5
 BATCH_REPEAT=1
+SKIP_TC=0
 
 usage() {
   cat <<'EOF'
@@ -29,6 +30,7 @@ Options:
   --single-repeat <int>         Repetitions for single latency (default: 5)
   --batch-repeat <int>          Repetitions for batched case (default: 1)
   --out-dir <path>              Output directory (default: run_logs/truncation_paper_grid)
+  --skip-tc                     Do not configure tc; run each case on the current local network
   -h, --help                    Show help
 
 Example:
@@ -43,6 +45,7 @@ while [[ $# -gt 0 ]]; do
     --single-repeat) SINGLE_REPEAT="$2"; shift 2 ;;
     --batch-repeat) BATCH_REPEAT="$2"; shift 2 ;;
     --out-dir) OUT_DIR="$2"; shift 2 ;;
+    --skip-tc) SKIP_TC=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage; exit 1 ;;
   esac
@@ -60,6 +63,7 @@ echo "bandwidth=${BANDWIDTH}"
 echo "batch_size=${BATCH_SIZE}"
 echo "single_repeat=${SINGLE_REPEAT}"
 echo "batch_repeat=${BATCH_REPEAT}"
+echo "skip_tc=${SKIP_TC}"
 echo "delays=${DELAYS_MS[*]}"
 echo "parties=${PARTIES[*]}"
 echo
@@ -76,7 +80,8 @@ for delay_ms in "${DELAYS_MS[@]}"; do
       --single-repeat "${SINGLE_REPEAT}" \
       --batch-repeat "${BATCH_REPEAT}" \
       --label "${label}" \
-      --out-dir "${OUT_DIR}"
+      --out-dir "${OUT_DIR}" \
+      $([[ "${SKIP_TC}" -eq 1 ]] && printf '%s' --skip-tc)
     echo
   done
 done
