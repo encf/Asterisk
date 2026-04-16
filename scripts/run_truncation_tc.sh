@@ -52,6 +52,15 @@ require_cmd() {
   fi
 }
 
+validate_port_range() {
+  local port="$1"
+  local max_port_needed=$((port + 399))
+  if (( port < 1024 || max_port_needed > 65535 )); then
+    echo "Invalid --base-port=${port}: this wrapper needs ports up to ${max_port_needed}, which must stay within 1024..65535." >&2
+    exit 1
+  fi
+}
+
 clear_tc() {
   sudo tc qdisc del dev lo root 2>/dev/null || true
 }
@@ -113,6 +122,8 @@ if [[ ! -x "${COMPARE_SCRIPT}" ]]; then
   echo "Expected executable compare script at ${COMPARE_SCRIPT}" >&2
   exit 1
 fi
+
+validate_port_range "${BASE_PORT}"
 
 if [[ -z "${LABEL}" ]]; then
   LABEL="bw_${BANDWIDTH}_owd_${ONE_WAY_DELAY_MS}ms_n${N}"

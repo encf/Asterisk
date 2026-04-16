@@ -11,7 +11,7 @@ PARTIES=(5 10 16)
 BATCH_SIZE=1000
 SINGLE_REPEAT=5
 BATCH_REPEAT=1
-BASE_PORT=70000
+BASE_PORT=50000
 
 usage() {
   cat <<'EOF'
@@ -29,7 +29,7 @@ Options:
   -b, --batch-size <int>        Batch truncation size (default: 1000)
   --single-repeat <int>         Repetitions for single latency (default: 5)
   --batch-repeat <int>          Repetitions for batched case (default: 1)
-  --base-port <int>             Base port for the first condition (default: 70000)
+  --base-port <int>             Base port for the first condition (default: 50000)
   --out-dir <path>              Output directory (default: run_logs/truncation_tc_matrix)
   -h, --help                    Show help
 
@@ -42,6 +42,16 @@ csv_to_array() {
   local raw="$1"
   local -n out_ref="$2"
   IFS=',' read -r -a out_ref <<<"$raw"
+}
+
+validate_port_range() {
+  local start_port="$1"
+  local num_cases=$2
+  local last_port=$((start_port + (num_cases - 1) * 1000 + 399))
+  if (( start_port < 1024 || last_port > 65535 )); then
+    echo "Invalid --base-port=${start_port}: this matrix run needs ports up to ${last_port}, which must stay within 1024..65535." >&2
+    exit 1
+  fi
 }
 
 while [[ $# -gt 0 ]]; do
@@ -69,6 +79,9 @@ if [[ ! -x "${RUN_SCRIPT}" ]]; then
   echo "Expected executable wrapper script at ${RUN_SCRIPT}" >&2
   exit 1
 fi
+
+num_cases=$(( ${#DELAYS_MS[@]} * ${#PARTIES[@]} ))
+validate_port_range "${BASE_PORT}" "${num_cases}"
 
 mkdir -p "${OUT_DIR}"
 current_port="${BASE_PORT}"
