@@ -1,15 +1,79 @@
-# Asterisk
+# Asterisk 2.0 Artifact
 
-This directory contains the implementation of the Asterisk fair protocol.
-The protocol is implemented in C++17 and [CMake](https://cmake.org/) is used as the build system.
+- English: see [README_EN.md](README_EN.md)
+- 中文：见 [README_CN.md](README_CN.md)
 
-Field modulus is unified to:
+<!--
 
-```text
-p = 2^64 - 59 = 18446744073709551557
+### Repository map
+
+- `src/Asterisk2.0/`: main implementation of Asterisk 2.0.
+- `src/asterisk/`: baseline Asterisk implementation used in the paper.
+- `benchmark/`: benchmark entry points for multiplication, comparison, equality, truncation, and dark-pool workloads.
+- `scripts/`: reproduction scripts for the main tables and experiments.
+- `test/`: unit and regression tests.
+
+### Paper-to-code map
+
+| Paper topic | Code / benchmark entry point | Reproduction script |
+| --- | --- | --- |
+| Integer multiplication | `benchmark/asterisk2_mpc.cpp`, `benchmark/asterisk_offline.cpp`, `benchmark/asterisk_online.cpp` | `scripts/compare_mul_protocols.sh` |
+| Comparison | `benchmark/asterisk2_bgtez.cpp`, `benchmark/asterisk_cmp_offline.cpp`, `benchmark/asterisk_cmp_online.cpp` | `scripts/compare_cmp_protocols.sh` |
+| Equality testing | `benchmark/asterisk2_eqz.cpp` | `scripts/compare_eqz_a2.sh`, `scripts/check_eqz_a2.sh` |
+| Fixed-point multiplication | `benchmark/asterisk2_mpc.cpp` with truncation enabled | `scripts/compare_fixedpoint_mul_a2.sh` |
+| Standalone truncation | `benchmark/asterisk2_mpc.cpp` with truncation enabled | `scripts/compare_truncation_a2.sh`, `scripts/run_truncation_tc_matrix.sh` |
+| Dark-pool volume matching | `benchmark/asterisk2_darkpool_vm.cpp`, baseline `benchmark/Darkpool_VM.cpp` | `scripts/compare_vm_protocols.sh` |
+| Dark-pool continuous double auction | `benchmark/asterisk2_darkpool_cda.cpp`, baseline `benchmark/Darkpool_CDA.cpp` | `scripts/compare_cda_protocols.sh` |
+
+### Recommended reproduction order
+
+```sh
+./scripts/compare_mul_protocols.sh -n 3 -d 10 -r 3
+./scripts/compare_cmp_protocols.sh -n 3 -c 20
+./scripts/compare_fixedpoint_mul_a2.sh -n 3 -c 20
+./scripts/run_truncation_tc_matrix.sh
+./scripts/compare_vm_protocols.sh
+./scripts/compare_cda_protocols.sh
 ```
 
-## 🧭 开发执行清单（贡献者工作流）
+These scripts write raw per-party JSON outputs and aggregated summaries under `run_logs/`.
+
+## 审稿人导览（中文版）
+
+### 仓库与论文的对应关系
+
+- `src/Asterisk2.0/`：Asterisk 2.0 主实现。
+- `src/asterisk/`：论文中用于对比的 Asterisk 基线实现。
+- `benchmark/`：乘法、比较、等式、截断以及 dark-pool 工作负载的 benchmark 入口。
+- `scripts/`：论文主要表格和实验的复现脚本。
+- `test/`：单元测试与回归测试。
+
+### 论文结果与脚本映射
+
+| 论文内容 | 对应代码 / benchmark | 推荐脚本 |
+| --- | --- | --- |
+| 整数乘法 | `benchmark/asterisk2_mpc.cpp`，以及基线 `benchmark/asterisk_offline.cpp` / `benchmark/asterisk_online.cpp` | `scripts/compare_mul_protocols.sh` |
+| 比较协议 | `benchmark/asterisk2_bgtez.cpp`，以及基线 `benchmark/asterisk_cmp_offline.cpp` / `benchmark/asterisk_cmp_online.cpp` | `scripts/compare_cmp_protocols.sh` |
+| 等式测试 | `benchmark/asterisk2_eqz.cpp` | `scripts/compare_eqz_a2.sh`，`scripts/check_eqz_a2.sh` |
+| 定点数乘法 | `benchmark/asterisk2_mpc.cpp` 开启 truncation 参数 | `scripts/compare_fixedpoint_mul_a2.sh` |
+| 独立截断 | `benchmark/asterisk2_mpc.cpp` 开启 truncation 参数 | `scripts/compare_truncation_a2.sh`，`scripts/run_truncation_tc_matrix.sh` |
+| Dark-pool VM | `benchmark/asterisk2_darkpool_vm.cpp`，基线为 `benchmark/Darkpool_VM.cpp` | `scripts/compare_vm_protocols.sh` |
+| Dark-pool CDA | `benchmark/asterisk2_darkpool_cda.cpp`，基线为 `benchmark/Darkpool_CDA.cpp` | `scripts/compare_cda_protocols.sh` |
+
+### 建议的快速复现顺序
+
+```sh
+./scripts/compare_mul_protocols.sh -n 3 -d 10 -r 3
+./scripts/compare_cmp_protocols.sh -n 3 -c 20
+./scripts/compare_fixedpoint_mul_a2.sh -n 3 -c 20
+./scripts/run_truncation_tc_matrix.sh
+./scripts/compare_vm_protocols.sh
+./scripts/compare_cda_protocols.sh
+```
+
+这些脚本会把原始 per-party JSON 结果和汇总结果保存到 `run_logs/` 下。
+
+## Additional Build and Script Notes
 
 为保证每次任务可复现、可交接，建议在开发时固定执行以下流程：
 
@@ -418,27 +482,30 @@ After building benchmarks, run:
 This starts party IDs `0..3` locally and stores logs under:
 `./run_logs/chain_mul_10/`.
 
-## Asterisk2.0 malicious roadmap
+## Asterisk2.0 malicious implementation overview
 
-- 详细的恶意安全实现任务分解见：`docs/asterisk2_malicious_implementation_plan.md`。
-- 该路线图把实现拆分为认证分享、延迟验证、公平输出释放、恶意乘法、trunc/compare 升级、benchmark 与测试。
-- 当前已落地：malicious 乘法离线/在线分派、authenticated tuple 预处理、`Pi_MACSetup-DH` 与显式 `KeyManager`（`[Δ]` / `[Δ^{-1}]` 由 `runMacSetupDH` 提供）。
-- `KeyManager` 当前维护两类会话密钥：helper<->party pairwise key，以及仅计算方共享的 `K_P`（用于 `compare_offline` 共享掩码/置换生成）。
-- malicious 输入分享已接入：按 `x' = x + r + t` 与 helper 补足 share 的流程生成 `[x]`/`[Δx]`（当前输入 owner 约定为 `P0`）；一致性检查改由单元测试覆盖。
-- malicious 乘法离线预处理已接入 authenticated tuple：除 `[a],[b],[ab]` 外，还会生成 `[a'],[b'],[c'],[a'b'],[a'c'],[b'c'],[a'b'c']` 的 additive shares。
-- `Pi_MACSetup-DH` 现在在 malicious 模式协议初始化阶段执行一次；后续 `mul_offline_malicious` 仅复用已缓存的 `[Δ]/[Δ^{-1}]` 份额。
-- `mul_online_malicious` 当前按门级在线流程打开 `d,e,d_Δ,e_Δ,f`，并在本地同步组装 `[xy]` 与 `[Δxy]`（已移除旧的 helper 端输出重构一致性检查路径）。
-- 已新增 malicious 认证概率截断 split 接口：`trunc_offline_malicious(...)` 与 `trunc_online_malicious(...)`，可从 `[x],[Δx]` 输出 `[Trunc_m(x)],[ΔTrunc_m(x)]`。
-- 已新增 malicious 认证比较 split 接口：`compare_offline_malicious(...)` 与 `compare_online_malicious(...)`，输入 `[x],[Δx]` 输出 `[GTEZ(x)],[ΔGTEZ(x)]`，在线流程固定为 3 轮。
-- 当前仍在开发：Ver-DH、deferred batch verify、fair release。
+The malicious Asterisk 2.0 path in this repository includes:
+
+- authenticated secret sharing and MAC setup;
+- authenticated multiplication preprocessing and online evaluation;
+- authenticated probabilistic truncation;
+- authenticated comparison and equality support;
+- helper-assisted deferred verification and fair output release logic used by the protocol implementation and paper benchmarks.
+
+For implementation details, see:
+
+- `src/Asterisk2.0/protocol.h`
+- `src/Asterisk2.0/protocol.cpp`
+- `docs/asterisk2_malicious_implementation_plan.md`
 
 ## Usage
 A short description of the compiled programs is given below.
 All of them provide detailed usage description on using the `--help` option.
 
 - `benchmarks/asterisk_mpc`: Benchmark the performance of the Asterisk protocol (both offline and online phases) by evaluating a circuit with a given depth and number of multiplication gates at each depth.
-- `benchmarks/asterisk2_mpc`: Benchmark the performance of the Asterisk2.0 semi-honest Beaver multiplication protocol with one helper party and n computing parties.
-- `benchmarks/asterisk2_bgtez`: Benchmark the Asterisk2.0 BGTEZ-SH batched comparison protocol and output online/offline/communication metrics.
+- `benchmarks/asterisk2_mpc`: Benchmark the performance of the Asterisk2.0 multiplication / truncation path in semi-honest or malicious mode.
+- `benchmarks/asterisk2_bgtez`: Benchmark the Asterisk2.0 batched comparison protocol and output online/offline/communication metrics.
+- `benchmarks/asterisk2_eqz`: Benchmark the Asterisk2.0 equality-testing protocol.
 - `benchmarks/asterisk_online`: Benchmark the performance of the Asterisk online phase for a circuit with a given depth and number of multiplication gates at each depth.
 - `benchmarks/asterisk_offline`: Benchmark the performance of the Asterisk offline phase for a circuit with a given depth and number of multiplication gates at each depth.
 - `benchmarks/assistedmpc_offline`: Benchmark the performance of the Assisted MPC offline phase for a circuit with a given depth and number of multiplication gates at each depth.
@@ -463,12 +530,13 @@ Execute the following commands from the `build` directory created during compila
 # repository root.
 ./benchmarks/asterisk_mpc -p $PID --localhost -g 100 -d 10 -n 5
 
-# Benchmark Asterisk2.0 semi-honest Beaver MPC.
+# Benchmark Asterisk2.0 MPC.
 #
 # 该程序需要启动 n+1 个进程：其中 0..n-1 为计算方，n 为 helper。
 ./benchmarks/asterisk2_mpc -p $PID --localhost -g 100 -d 10 -n 5
-# 安全模型参数（semi-honest 完整可用；malicious 为开发中实验路径）
+# 安全模型参数
 ./benchmarks/asterisk2_mpc -p $PID --localhost -g 100 -d 10 -n 5 --security-model semi-honest
+./benchmarks/asterisk2_mpc -p $PID --localhost -g 100 -d 10 -n 5 --security-model malicious
 # 说明：benchmark 内部会按安全模型走对应的 mul_offline/mul_online 路径，
 # 以保留 malicious 所需的离线材料（不仅是 triples）。
 # 在 malicious 模式下，helper 也会参与 online 流程（例如输入分享阶段）。
@@ -611,3 +679,4 @@ wait
 python3 scripts/network_cost_model.py --preset lan --bytes-sent 4096 --rounds 100
 python3 scripts/network_cost_model.py --preset wan --msg-size-bytes 16 --parties 5 --rounds 100
 ```
+-->

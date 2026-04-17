@@ -4,8 +4,8 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_DIR="${ROOT_DIR}/build"
 
-N=3
-COMPARE_COUNT=10
+N=5
+COMPARE_COUNT=1
 LX=16
 SLACK=8
 BASE_PORT=""
@@ -22,8 +22,8 @@ Compare protocol benchmark (offline/online comm+time) across:
   3) Asterisk2.0 malicious compare
 
 Options:
-  -n, --num-parties <int>    Number of computing parties (default: 3)
-  -c, --compare-count <int>  Number of comparisons (default: 10)
+  -n, --num-parties <int>    Number of computing parties (default: 5)
+  -c, --compare-count <int>  Number of comparisons (default: 1)
   --lx <int>                 BGTEZ lx parameter (default: 16)
   --slack <int>              BGTEZ slack parameter s (default: 8)
   -p, --base-port <int>      Base port for the first run (default: auto-pick)

@@ -12,7 +12,7 @@ BASE_PORT=61000
 PING_COUNT=5
 CLEAR_TC_ON_EXIT=1
 
-PARTIES=(5 10 25 50 100)
+PARTIES=(5 10 16)
 ONE_WAY_DELAYS_MS=(20 50)
 
 usage() {
@@ -28,13 +28,13 @@ The script:
 Default experiment grid:
   - bandwidth: 100mbit
   - one-way delay: 20ms, 50ms
-  - participants: 5, 10, 25, 50, 100
+  - participants: 5, 10, 16
   - chain multiplications: 10000
 
 Options:
   --bandwidth <rate>        tc rate, e.g. 100mbit (default: 100mbit)
   --delays <list>           comma-separated one-way delays in ms (default: 20,50)
-  --parties <list>          comma-separated participant counts (default: 5,10,25,50,100)
+  --parties <list>          comma-separated participant counts (default: 5,10,16)
   --chain-mul <int>         number of dependent multiplications (default: 10000)
   --repeat <int>            benchmark repeat count passed to compare_mul_protocols.sh (default: 1)
   --base-port <int>         base port for the first condition (default: 61000)
@@ -46,7 +46,7 @@ Options:
 Examples:
   scripts/run_table3_tc.sh
   scripts/run_table3_tc.sh --repeat 3
-  scripts/run_table3_tc.sh --delays 20,50 --parties 5,25,100
+  scripts/run_table3_tc.sh --delays 20,50 --parties 5,10,16
 EOF
 }
 

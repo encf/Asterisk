@@ -4,8 +4,8 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_DIR="${ROOT_DIR}/build"
 
-N=3
-FIXED_MUL_COUNT=10
+N=5
+FIXED_MUL_COUNT=1000
 FRAC_BITS=8
 ELL_X=40
 SLACK=8
@@ -22,8 +22,8 @@ Compare Asterisk2.0 fixed-point multiplication
   - malicious
 
 Options:
-  -n, --num-parties <int>       Number of computing parties (default: 3)
-  -c, --fixed-mul-count <int>   Number of fixed-point multiplications (default: 10)
+  -n, --num-parties <int>       Number of computing parties (default: 5)
+  -c, --fixed-mul-count <int>   Number of fixed-point multiplications (default: 1000)
   --frac-bits <int>             Fractional bits m for truncation (default: 8)
   --ell-x <int>                 Truncation ell_x (default: 40)
   --slack <int>                 Truncation slack s (default: 8)
@@ -74,7 +74,13 @@ run_model() {
 run_model semi-honest "${BASE_PORT}"
 run_model malicious "$((BASE_PORT + 200))"
 
-python - "${OUT_DIR}" "${N}" <<'PY'
+PYTHON_BIN="$(command -v python3 || command -v python || true)"
+if [[ -z "${PYTHON_BIN}" ]]; then
+  echo "Python interpreter not found. Please install python3." >&2
+  exit 1
+fi
+
+"${PYTHON_BIN}" - "${OUT_DIR}" "${N}" <<'PY'
 import json, pathlib, statistics, sys
 
 out_dir = pathlib.Path(sys.argv[1])

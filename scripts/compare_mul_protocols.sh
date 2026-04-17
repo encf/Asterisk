@@ -4,10 +4,10 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_DIR="${ROOT_DIR}/build"
 
-N=3
-CHAIN_MUL=10
+N=5
+CHAIN_MUL=10000
 GATES_PER_LEVEL=1
-REPEAT=3
+REPEAT=1
 BASE_PORT=31000
 OUT_DIR="${ROOT_DIR}/run_logs/protocol_compare"
 
@@ -21,10 +21,10 @@ Run and compare multiplication protocol benchmarks:
   3) Asterisk2.0 malicious
 
 Options:
-  -n, --num-parties <int>      Number of computing parties (default: 3)
-  -d, --chain-mul <int>        Continuous multiplication count / depth (default: 10)
+  -n, --num-parties <int>      Number of computing parties (default: 5)
+  -d, --chain-mul <int>        Continuous multiplication count / depth (default: 10000)
   -g, --gates-per-level <int>  Multiplication gates per level (default: 1)
-  -r, --repeat <int>           Repeat count per party (default: 3)
+  -r, --repeat <int>           Repeat count per party (default: 1)
   -p, --base-port <int>        Base port used by first run (default: 31000)
   -o, --out-dir <path>         Output directory (default: run_logs/protocol_compare)
   -h, --help                   Show this help
