@@ -14,6 +14,7 @@ X_CLEAR=0
 BASE_PORT=""
 LABEL=""
 OUT_DIR="${ROOT_DIR}/run_logs/eqz_compare"
+SEARCH_PORT=""
 
 usage() {
   cat <<'EOF'
@@ -37,7 +38,7 @@ Options:
   --lx <int>                    EQZ lx parameter (default: 16)
   --slack <int>                 EQZ slack parameter s (default: 8)
   --x, --x-clear <int>          Clear signed input x (default: 0)
-  -p, --base-port <int>         Base port (default: auto-pick a free range)
+  -p, --base-port <int>         Starting port hint (default: auto-pick a free range)
   --label <text>                Optional scenario label for the summary output
   -o, --out-dir <path>          Output directory (default: run_logs/eqz_compare)
   -h, --help                    Show help
@@ -74,19 +75,15 @@ fi
 cmake --build "${BUILD_DIR}" -j"$(nproc)" --target asterisk2_eqz >/dev/null
 
 TOTAL_PARTIES=$((N + 1))
-PORT_STRIDE="$(localhost_compute_port_stride "${TOTAL_PARTIES}" 64)"
-TOTAL_PORT_WIDTH=$((2 * PORT_STRIDE))
-
-if [[ -n "${BASE_PORT}" ]]; then
-  localhost_ensure_base_port_available "${BASE_PORT}" "${TOTAL_PORT_WIDTH}"
-else
-  BASE_PORT="$(localhost_pick_free_base_port "${TOTAL_PORT_WIDTH}")"
-fi
+PORT_STRIDE="$(localhost_compute_port_stride "${TOTAL_PARTIES}" 0)"
+SEARCH_PORT="${BASE_PORT:-10000}"
 
 run_case() {
   local model="$1"
-  local port="$2"
   local run_dir="${RUN_OUT_DIR}/${model}"
+  local port
+  port="$(localhost_pick_free_base_port "${PORT_STRIDE}" "${SEARCH_PORT}")"
+  SEARCH_PORT=$((port + PORT_STRIDE))
   echo "[RUN] model=${model}, repeat=${REPEAT}, x=${X_CLEAR}, port=${port}"
   localhost_run_multiparty_group "${run_dir}" "${N}" "${port}" "${PORT_STRIDE}" \
     "${BUILD_DIR}/benchmarks/asterisk2_eqz" \
@@ -95,8 +92,8 @@ run_case() {
   echo "[DONE] model=${model}"
 }
 
-run_case semi-honest "${BASE_PORT}"
-run_case malicious "$((BASE_PORT + PORT_STRIDE))"
+run_case semi-honest
+run_case malicious
 
 python3 - "${RUN_OUT_DIR}" "${N}" "${REPEAT}" "${LABEL}" "${LX}" "${SLACK}" "${X_CLEAR}" "${FIELD_PRIME}" <<'PY'
 import json

@@ -53,15 +53,21 @@ ensure_sudo_ready() {
   fi
 }
 
-validate_port_range() {
+validate_port_plan() {
   local start_port="$1"
-  local num_cases=$2
-  local max_total_parties=$3
-  local case_stride=$((2 * max_total_parties * max_total_parties + 32))
-  local per_run_width=$((4 * case_stride))
-  local last_port=$((start_port + (num_cases - 1) * per_run_width + per_run_width - 1))
+  local current="$start_port"
+  local last_port=0
+  local delay_ms n total_parties case_stride
+  for delay_ms in "${DELAYS_MS[@]}"; do
+    for n in "${PARTIES[@]}"; do
+      total_parties=$((n + 1))
+      case_stride=$((2 * total_parties * (total_parties - 1)))
+      last_port=$((current + case_stride - 1))
+      current=$((current + case_stride))
+    done
+  done
   if (( start_port < 1024 || last_port > 65535 )); then
-    echo "Invalid --base-port=${start_port}: this matrix run needs ports up to ${last_port}, which must stay within 1024..65535." >&2
+    echo "Invalid --base-port=${start_port}: this matrix run needs hint ports up to ${last_port}, which must stay within 1024..65535." >&2
     exit 1
   fi
 }
@@ -95,22 +101,11 @@ fi
 ensure_sudo_ready
 
 if [[ -n "${BASE_PORT}" ]]; then
-  num_cases=$(( ${#DELAYS_MS[@]} * ${#PARTIES[@]} ))
-  max_parties=0
-  for n in "${PARTIES[@]}"; do
-    if (( n > max_parties )); then
-      max_parties=$n
-    fi
-  done
-  validate_port_range "${BASE_PORT}" "${num_cases}" "$((max_parties + 1))"
+  validate_port_plan "${BASE_PORT}"
 fi
 
 mkdir -p "${OUT_DIR}"
 current_port="${BASE_PORT}"
-if [[ -n "${BASE_PORT}" ]]; then
-  max_total_parties=$((max_parties + 1))
-  per_run_width=$((4 * (2 * max_total_parties * max_total_parties + 32)))
-fi
 
 for delay_ms in "${DELAYS_MS[@]}"; do
   delay_ms="${delay_ms%ms}"
@@ -138,6 +133,8 @@ for delay_ms in "${DELAYS_MS[@]}"; do
     "${run_cmd[@]}" | tee "${run_dir}.log"
 
     if [[ -n "${BASE_PORT}" ]]; then
+      total_parties=$((n + 1))
+      per_run_width=$((2 * total_parties * (total_parties - 1)))
       current_port=$((current_port + per_run_width))
     fi
   done

@@ -59,7 +59,7 @@ localhost_compute_port_stride() {
 import sys
 n_total = int(sys.argv[1])
 cushion = int(sys.argv[2])
-print(2 * n_total * n_total + cushion)
+print(2 * n_total * (n_total - 1) + cushion)
 PY
 }
 

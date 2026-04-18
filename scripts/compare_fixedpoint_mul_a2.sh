@@ -12,6 +12,7 @@ ELL_X=40
 SLACK=8
 BASE_PORT=""
 OUT_DIR="${ROOT_DIR}/run_logs/fixedpoint_mul_compare"
+SEARCH_PORT=""
 
 usage() {
   cat <<'EOF'
@@ -28,7 +29,7 @@ Options:
   --frac-bits <int>             Fractional bits m for truncation (default: 8)
   --ell-x <int>                 Truncation ell_x (default: 40)
   --slack <int>                 Truncation slack s (default: 8)
-  -p, --base-port <int>         Base port (default: auto-pick)
+  -p, --base-port <int>         Starting port hint (default: auto-pick)
   -o, --out-dir <path>          Output directory (default: run_logs/fixedpoint_mul_compare)
   -h, --help                    Show help
 EOF
@@ -51,14 +52,8 @@ done
 mkdir -p "${OUT_DIR}"
 
 TOTAL_PARTIES=$((N + 1))
-PORT_STRIDE="$(localhost_compute_port_stride "${TOTAL_PARTIES}" 64)"
-TOTAL_PORT_WIDTH=$((2 * PORT_STRIDE))
-
-if [[ -n "${BASE_PORT}" ]]; then
-  localhost_ensure_base_port_available "${BASE_PORT}" "${TOTAL_PORT_WIDTH}"
-else
-  BASE_PORT="$(localhost_pick_free_base_port "${TOTAL_PORT_WIDTH}")"
-fi
+PORT_STRIDE="$(localhost_compute_port_stride "${TOTAL_PARTIES}" 0)"
+SEARCH_PORT="${BASE_PORT:-10000}"
 
 if [[ ! -f "${BUILD_DIR}/CMakeCache.txt" ]]; then
   cmake -S "${ROOT_DIR}" -B "${BUILD_DIR}" -DCMAKE_BUILD_TYPE=Release \
@@ -68,8 +63,10 @@ cmake --build "${BUILD_DIR}" -j"$(nproc)" --target asterisk2_mpc >/dev/null
 
 run_model() {
   local model="$1"
-  local port="$2"
   local run_dir="${OUT_DIR}/${model}"
+  local port
+  port="$(localhost_pick_free_base_port "${PORT_STRIDE}" "${SEARCH_PORT}")"
+  SEARCH_PORT=$((port + PORT_STRIDE))
   echo "[RUN] model=${model}, fixed_mul_count=${FIXED_MUL_COUNT}, port=${port}"
   localhost_run_multiparty_group "${run_dir}" "${N}" "${port}" "${PORT_STRIDE}" \
     "${BUILD_DIR}/benchmarks/asterisk2_mpc" \
@@ -79,8 +76,8 @@ run_model() {
   echo "[DONE] model=${model}"
 }
 
-run_model semi-honest "${BASE_PORT}"
-run_model malicious "$((BASE_PORT + PORT_STRIDE))"
+run_model semi-honest
+run_model malicious
 
 PYTHON_BIN="$(command -v python3 || command -v python || true)"
 if [[ -z "${PYTHON_BIN}" ]]; then

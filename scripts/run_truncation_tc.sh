@@ -66,10 +66,10 @@ ensure_sudo_ready() {
 validate_port_range() {
   local port="$1"
   local total_parties=$2
-  local case_stride=$((2 * total_parties * total_parties + 32))
-  local max_port_needed=$((port + 4 * case_stride - 1))
+  local case_stride=$((2 * total_parties * (total_parties - 1)))
+  local max_port_needed=$((port + case_stride - 1))
   if (( port < 1024 || max_port_needed > 65535 )); then
-    echo "Invalid --base-port=${port}: this wrapper needs ports up to ${max_port_needed}, which must stay within 1024..65535." >&2
+    echo "Invalid --base-port=${port}: this wrapper needs hint ports up to ${max_port_needed}, which must stay within 1024..65535." >&2
     exit 1
   fi
 }

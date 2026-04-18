@@ -15,6 +15,7 @@ SLACK=8
 BASE_PORT=""
 LABEL=""
 OUT_DIR="${ROOT_DIR}/run_logs/truncation_compare"
+SEARCH_PORT=""
 
 usage() {
   cat <<'EOF'
@@ -40,7 +41,7 @@ Options:
   --frac-bits <int>             Fractional bits m for truncation (default: 8)
   --ell-x <int>                 Truncation ell_x (default: 40)
   --slack <int>                 Truncation slack s (default: 8)
-  -p, --base-port <int>         Base port (default: auto-pick a free range)
+  -p, --base-port <int>         Starting port hint (default: auto-pick a free range)
   --label <text>                Optional scenario label for the summary output
   -o, --out-dir <path>          Output directory (default: run_logs/truncation_compare)
   -h, --help                    Show help
@@ -49,7 +50,7 @@ EOF
 
 compute_case_port_stride() {
   local total_parties=$1
-  localhost_compute_port_stride "${total_parties}" 32
+  localhost_compute_port_stride "${total_parties}" 0
 }
 
 while [[ $# -gt 0 ]]; do
@@ -83,13 +84,7 @@ fi
 mkdir -p "${RUN_OUT_DIR}"
 TOTAL_PARTIES=$((N + 1))
 CASE_PORT_STRIDE="$(compute_case_port_stride "${TOTAL_PARTIES}")"
-TOTAL_PORT_WIDTH=$((4 * CASE_PORT_STRIDE))
-
-if [[ -n "${BASE_PORT}" ]]; then
-  localhost_ensure_base_port_available "${BASE_PORT}" "${TOTAL_PORT_WIDTH}"
-else
-  BASE_PORT="$(localhost_pick_free_base_port "${TOTAL_PORT_WIDTH}" 20000)"
-fi
+SEARCH_PORT="${BASE_PORT:-20000}"
 
 if [[ ! -f "${BUILD_DIR}/CMakeCache.txt" ]]; then
   cmake -S "${ROOT_DIR}" -B "${BUILD_DIR}" -DCMAKE_BUILD_TYPE=Release \
@@ -102,8 +97,10 @@ run_case() {
   local case_tag="$2"
   local gates="$3"
   local repeat="$4"
-  local port="$5"
   local run_dir="${RUN_OUT_DIR}/${model}/${case_tag}"
+  local port
+  port="$(localhost_pick_free_base_port "${CASE_PORT_STRIDE}" "${SEARCH_PORT}")"
+  SEARCH_PORT=$((port + CASE_PORT_STRIDE))
   echo "[RUN] model=${model}, case=${case_tag}, gates=${gates}, repeat=${repeat}, port=${port}"
   localhost_run_multiparty_group "${run_dir}" "${N}" "${port}" "${CASE_PORT_STRIDE}" \
     "${BUILD_DIR}/benchmarks/asterisk2_mpc" \
@@ -116,13 +113,12 @@ run_case() {
 
 run_model() {
   local model="$1"
-  local port_base="$2"
-  run_case "${model}" single 1 "${SINGLE_REPEAT}" "${port_base}"
-  run_case "${model}" batch "${BATCH_SIZE}" "${BATCH_REPEAT}" "$((port_base + CASE_PORT_STRIDE))"
+  run_case "${model}" single 1 "${SINGLE_REPEAT}"
+  run_case "${model}" batch "${BATCH_SIZE}" "${BATCH_REPEAT}"
 }
 
-run_model semi-honest "${BASE_PORT}"
-run_model malicious "$((BASE_PORT + 2 * CASE_PORT_STRIDE))"
+run_model semi-honest
+run_model malicious
 
 python3 - "${RUN_OUT_DIR}" "${N}" "${BATCH_SIZE}" "${LABEL}" "${ELL_X}" "${FRAC_BITS}" "${SLACK}" "${SINGLE_REPEAT}" "${BATCH_REPEAT}" <<'PY'
 import json

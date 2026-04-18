@@ -12,6 +12,7 @@ SLACK=8
 BASE_PORT=""
 LABEL=""
 OUT_DIR="${ROOT_DIR}/run_logs/compare_protocols"
+SEARCH_PORT=""
 
 usage() {
   cat <<'EOF'
@@ -27,7 +28,7 @@ Options:
   -c, --compare-count <int>  Number of comparisons (default: 1)
   --lx <int>                 BGTEZ lx parameter (default: 16)
   --slack <int>              BGTEZ slack parameter s (default: 8)
-  -p, --base-port <int>      Base port for the first run (default: auto-pick)
+  -p, --base-port <int>      Starting port hint for the first run (default: auto-pick)
   --label <text>             Optional scenario label for the summary output
   -o, --out-dir <path>       Output directory (default: run_logs/compare_protocols)
   -h, --help                 Show help
@@ -63,34 +64,30 @@ fi
 cmake --build "${BUILD_DIR}" -j"$(nproc)" --target benchmarks >/dev/null
 
 TOTAL_PARTIES=$((N + 1))
-PORT_STRIDE="$(localhost_compute_port_stride "${TOTAL_PARTIES}" 64)"
-TOTAL_PORT_WIDTH=$((4 * PORT_STRIDE))
-
-if [[ -n "${BASE_PORT}" ]]; then
-  localhost_ensure_base_port_available "${BASE_PORT}" "${TOTAL_PORT_WIDTH}"
-else
-  BASE_PORT="$(localhost_pick_free_base_port "${TOTAL_PORT_WIDTH}")"
-fi
+PORT_STRIDE="$(localhost_compute_port_stride "${TOTAL_PARTIES}" 0)"
+SEARCH_PORT="${BASE_PORT:-10000}"
 
 run_multiparty() {
   local tag="$1"
-  local port="$2"
-  shift 2
+  shift
   local -a cmd=("$@")
   local run_dir="${RUN_OUT_DIR}/${tag}"
+  local port
+  port="$(localhost_pick_free_base_port "${PORT_STRIDE}" "${SEARCH_PORT}")"
+  SEARCH_PORT=$((port + PORT_STRIDE))
   echo "[RUN] tag=${tag}, compare_count=${COMPARE_COUNT}, port=${port}"
   localhost_run_multiparty_group "${run_dir}" "${N}" "${port}" "${PORT_STRIDE}" "${cmd[@]}"
   echo "[DONE] tag=${tag}"
 }
 
-run_multiparty "asterisk_offline" "${BASE_PORT}" \
+run_multiparty "asterisk_offline" \
   "${BUILD_DIR}/benchmarks/asterisk_cmp_offline" -c "${COMPARE_COUNT}" -r 1
-run_multiparty "asterisk_online" "$((BASE_PORT + PORT_STRIDE))" \
+run_multiparty "asterisk_online" \
   "${BUILD_DIR}/benchmarks/asterisk_cmp_online" -c "${COMPARE_COUNT}" -r 1
-run_multiparty "asterisk2_bgtez_sh" "$((BASE_PORT + 2 * PORT_STRIDE))" \
+run_multiparty "asterisk2_bgtez_sh" \
   "${BUILD_DIR}/benchmarks/asterisk2_bgtez" --security-model semi-honest \
   --lx "${LX}" --slack "${SLACK}" --x-clear 123 -r "${COMPARE_COUNT}"
-run_multiparty "asterisk2_bgtez_mal" "$((BASE_PORT + 3 * PORT_STRIDE))" \
+run_multiparty "asterisk2_bgtez_mal" \
   "${BUILD_DIR}/benchmarks/asterisk2_bgtez" --security-model malicious \
   --lx "${LX}" --slack "${SLACK}" --x-clear 123 -r "${COMPARE_COUNT}"
 

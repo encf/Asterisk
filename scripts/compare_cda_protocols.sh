@@ -19,6 +19,7 @@ SECURITY_PARAM=128
 BASE_PORT=""
 LABEL=""
 OUT_DIR="${ROOT_DIR}/run_logs/cda_protocols"
+SEARCH_PORT=""
 
 usage() {
   cat <<'EOF'
@@ -41,7 +42,7 @@ Options:
   -r, --repeat <int>           Repetitions per case (default: 1)
   --threads <int>              Legacy Asterisk thread count (default: 6)
   --security-param <int>       Legacy Asterisk security parameter (default: 128)
-  -p, --base-port <int>        Base port for the first run (default: auto-pick)
+  -p, --base-port <int>        Starting port hint for the first run (default: auto-pick)
   --label <text>               Optional scenario label
   -o, --out-dir <path>         Output directory (default: run_logs/cda_protocols)
   -h, --help                   Show help
@@ -83,40 +84,37 @@ fi
 cmake --build "${BUILD_DIR}" -j"$(nproc)" --target Darkpool_CDA asterisk2_darkpool_cda >/dev/null
 
 TOTAL_PARTIES=$((N + 1))
-PORT_STRIDE="$(localhost_compute_port_stride "${TOTAL_PARTIES}" 64)"
-TOTAL_PORT_WIDTH=$((3 * PORT_STRIDE))
-if [[ -n "${BASE_PORT}" ]]; then
-  localhost_ensure_base_port_available "${BASE_PORT}" "${TOTAL_PORT_WIDTH}"
-else
-  BASE_PORT="$(localhost_pick_free_base_port "${TOTAL_PORT_WIDTH}")"
-fi
+PORT_STRIDE="$(localhost_compute_port_stride "${TOTAL_PARTIES}" 0)"
+SEARCH_PORT="${BASE_PORT:-10000}"
 
 run_multiparty() {
   local tag="$1"
-  local port="$2"
-  shift 2
+  shift
   local -a cmd=("$@")
   local run_dir="${RUN_OUT_DIR}/${tag}"
+  local port
+  port="$(localhost_pick_free_base_port "${PORT_STRIDE}" "${SEARCH_PORT}")"
+  SEARCH_PORT=$((port + PORT_STRIDE))
   echo "[RUN] tag=${tag}, n=${N}, buy=${BUY_SIZE}, sell=${SELL_SIZE}, repeat=${REPEAT}, port=${port}"
   localhost_run_multiparty_group "${run_dir}" "${N}" "${port}" "${PORT_STRIDE}" "${cmd[@]}"
   echo "[DONE] tag=${tag}"
 }
 
-run_multiparty "asterisk_cda" "${BASE_PORT}" \
+run_multiparty "asterisk_cda" \
   "${BUILD_DIR}/benchmarks/Darkpool_CDA" \
   -b "${BUY_SIZE}" -s "${SELL_SIZE}" -r "${REPEAT}" \
   --new-order-name "${NEW_ORDER_NAME}" \
   --new-order-unit "${NEW_ORDER_UNIT}" \
   --new-order-price "${NEW_ORDER_PRICE}" \
   --threads "${THREADS}" --security-param "${SECURITY_PARAM}"
-run_multiparty "asterisk2_cda_sh" "$((BASE_PORT + PORT_STRIDE))" \
+run_multiparty "asterisk2_cda_sh" \
   "${BUILD_DIR}/benchmarks/asterisk2_darkpool_cda" \
   -b "${BUY_SIZE}" -s "${SELL_SIZE}" -r "${REPEAT}" \
   --security-model semi-honest --lx "${LX}" --slack "${SLACK}" \
   --new-order-name "${NEW_ORDER_NAME}" \
   --new-order-unit "${NEW_ORDER_UNIT}" \
   --new-order-price "${NEW_ORDER_PRICE}"
-run_multiparty "asterisk2_cda_dh" "$((BASE_PORT + 2 * PORT_STRIDE))" \
+run_multiparty "asterisk2_cda_dh" \
   "${BUILD_DIR}/benchmarks/asterisk2_darkpool_cda" \
   -b "${BUY_SIZE}" -s "${SELL_SIZE}" -r "${REPEAT}" \
   --security-model malicious --lx "${LX}" --slack "${SLACK}" \

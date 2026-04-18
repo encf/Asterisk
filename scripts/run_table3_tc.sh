@@ -9,9 +9,10 @@ source "${ROOT_DIR}/scripts/lib_localhost_runner.sh"
 BANDWIDTH="100mbit"
 CHAIN_MUL=10000
 REPEAT=1
-BASE_PORT=30000
+BASE_PORT=10000
 PING_COUNT=5
 CLEAR_TC_ON_EXIT=1
+SKIP_TC=0
 
 PARTIES=(5 10 16)
 ONE_WAY_DELAYS_MS=(20 50)
@@ -20,11 +21,14 @@ usage() {
   cat <<'EOF'
 Usage: scripts/run_table3_tc.sh [options]
 
-Run the full Table III multiplication experiment on loopback (`lo`) with `tc`.
-The script:
+Run the full Table III multiplication experiment on loopback (`lo`).
+By default, the script:
   1) applies symmetric one-way delay + bandwidth shaping on `lo`
   2) runs Asterisk / Asterisk2.0 multiplication benchmarks
   3) saves raw logs, `tc` state, `ping` output, and a Table III style summary
+
+With `--skip-tc`, the same experiment grid runs on the current local network
+without changing loopback qdisc state.
 
 Default experiment grid:
   - bandwidth: 100mbit
@@ -38,9 +42,10 @@ Options:
   --parties <list>          comma-separated participant counts (default: 5,10,16)
   --chain-mul <int>         number of dependent multiplications (default: 10000)
   --repeat <int>            benchmark repeat count passed to compare_mul_protocols.sh (default: 1)
-  --base-port <int>         base port for the first condition (default: 30000)
+  --base-port <int>         base port for the first condition (default: 10000)
   --ping-count <int>        ping probes used to snapshot RTT after tc setup (default: 5)
   --out-dir <path>          output directory (default: run_logs/table3_tc)
+  --skip-tc                 do not modify tc/ping; run on the current local network as-is
   --keep-tc                 keep the final tc rule instead of clearing it on exit
   -h, --help                show this help
 
@@ -54,6 +59,15 @@ EOF
 require_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
     echo "Missing required command: $1" >&2
+    exit 1
+  fi
+}
+
+ensure_sudo_ready() {
+  if ! sudo -n true 2>/dev/null; then
+    echo "This script needs sudo access to configure tc on loopback (lo)." >&2
+    echo "Please run it from an interactive terminal where sudo can prompt for your password," >&2
+    echo "or pre-authorize sudo before invoking the script." >&2
     exit 1
   fi
 }
@@ -93,7 +107,7 @@ PY
 }
 
 cleanup() {
-  if [[ "${CLEAR_TC_ON_EXIT}" -eq 1 ]]; then
+  if [[ "${SKIP_TC}" -eq 0 && "${CLEAR_TC_ON_EXIT}" -eq 1 ]]; then
     clear_tc
   fi
 }
@@ -114,20 +128,27 @@ while [[ $# -gt 0 ]]; do
     --base-port) BASE_PORT="$2"; shift 2 ;;
     --ping-count) PING_COUNT="$2"; shift 2 ;;
     --out-dir) OUT_DIR="$2"; shift 2 ;;
+    --skip-tc) SKIP_TC=1; shift ;;
     --keep-tc) CLEAR_TC_ON_EXIT=0; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage; exit 1 ;;
   esac
 done
 
-require_cmd sudo
-require_cmd tc
-require_cmd ping
 require_cmd python3
+if [[ "${SKIP_TC}" -eq 0 ]]; then
+  require_cmd sudo
+  require_cmd tc
+  require_cmd ping
+fi
 
 if [[ ! -x "${COMPARE_SCRIPT}" ]]; then
   echo "Expected executable compare script at ${COMPARE_SCRIPT}" >&2
   exit 1
+fi
+
+if [[ "${SKIP_TC}" -eq 0 ]]; then
+  ensure_sudo_ready
 fi
 
 validate_port_plan() {
@@ -140,14 +161,14 @@ validate_port_plan() {
   for n in "${parties[@]}"; do
     local total_parties=$((n + 1))
     local stride
-    stride="$(localhost_compute_port_stride "${total_parties}" 64)"
-    last_used=$((current + 4 * stride - 1))
-    current=$((current + 4 * stride))
+    stride="$(localhost_compute_port_stride "${total_parties}" 0)"
+    last_used=$((current + stride - 1))
+    current=$((current + stride))
   done
   local num_envs=${#ONE_WAY_DELAYS_MS[@]}
   last_used=$((start_port + (last_used - start_port + 1) * num_envs - 1))
-  if (( start_port < 1024 || last_used > 65535 )); then
-    echo "Invalid --base-port=${start_port}: this table run needs ports up to ${last_used}, which must stay within 1024..65535." >&2
+  if (( start_port < 1024 || last_used > LOCALHOST_LAUNCHER_PORT_END )); then
+    echo "Invalid --base-port=${start_port}: this table run needs hint ports up to ${last_used}, which must stay within 1024..${LOCALHOST_LAUNCHER_PORT_END}." >&2
     exit 1
   fi
 }
@@ -159,8 +180,6 @@ SUMMARY_CSV="${OUT_DIR}/table3_summary.csv"
 SUMMARY_MD="${OUT_DIR}/table3_summary.md"
 
 trap cleanup EXIT
-
-sudo -v
 
 cat >"${SUMMARY_CSV}" <<'EOF'
 one_way_delay_ms,rtt_ms,bandwidth,num_parties,protocol,offline_comm_mb,offline_time_s,online_comm_mb,online_time_s,end_to_end_time_s
@@ -174,25 +193,41 @@ for delay_ms in "${ONE_WAY_DELAYS_MS[@]}"; do
   env_dir="${OUT_DIR}/${env_tag}"
   mkdir -p "${env_dir}"
 
-  echo "=== Configuring lo: bandwidth=${BANDWIDTH}, one-way delay=${delay_ms}ms ==="
-  set_tc "${delay_ms}"
-  show_tc | tee "${env_dir}/tc_qdisc.txt"
+  if [[ "${SKIP_TC}" -eq 0 ]]; then
+    echo "=== Configuring lo: bandwidth=${BANDWIDTH}, one-way delay=${delay_ms}ms ==="
+    set_tc "${delay_ms}"
+    show_tc | tee "${env_dir}/tc_qdisc.txt"
 
-  ping_avg_ms="$(measure_ping_avg_ms "${env_dir}/ping.txt")"
-  {
-    echo "bandwidth=${BANDWIDTH}"
-    echo "one_way_delay_ms=${delay_ms}"
-    echo "approx_rtt_ms=$((delay_ms * 2))"
-    echo "measured_ping_avg_ms=${ping_avg_ms}"
-  } > "${env_dir}/env.txt"
+    ping_avg_ms="$(measure_ping_avg_ms "${env_dir}/ping.txt")"
+    {
+      echo "network_mode=tc_lo"
+      echo "interface=lo"
+      echo "bandwidth=${BANDWIDTH}"
+      echo "one_way_delay_ms=${delay_ms}"
+      echo "approx_rtt_ms=$((delay_ms * 2))"
+      echo "measured_ping_avg_ms=${ping_avg_ms}"
+    } > "${env_dir}/env.txt"
+  else
+    echo "=== Skipping tc configuration for requested case ${env_tag}; running on the current local network ==="
+    {
+      echo "network_mode=unchanged_local"
+      echo "interface=lo"
+      echo "requested_bandwidth=${BANDWIDTH}"
+      echo "requested_one_way_delay_ms=${delay_ms}"
+      echo "bandwidth=unchanged"
+      echo "one_way_delay_ms=unchanged"
+      echo "approx_rtt_ms=unchanged"
+      echo "measured_ping_avg_ms=NA"
+    } > "${env_dir}/env.txt"
+  fi
 
   for n in "${PARTIES[@]}"; do
     condition_dir="${env_dir}/n${n}"
     raw_dir="${condition_dir}/raw"
     mkdir -p "${condition_dir}"
     total_parties=$((n + 1))
-    port_stride="$(localhost_compute_port_stride "${total_parties}" 64)"
-    port_width=$((4 * port_stride))
+    port_stride="$(localhost_compute_port_stride "${total_parties}" 0)"
+    port_width="${port_stride}"
     condition_base_port="$(localhost_pick_free_base_port "${port_width}" "${current_port}")"
 
     echo "--- Running n=${n} at one-way delay ${delay_ms}ms (approx RTT $((delay_ms * 2))ms), base_port=${condition_base_port} ---"
@@ -321,7 +356,7 @@ PY
   done
 done
 
-python3 - "${SUMMARY_CSV}" "${SUMMARY_MD}" <<'PY'
+python3 - "${SUMMARY_CSV}" "${SUMMARY_MD}" "${SKIP_TC}" "${BANDWIDTH}" <<'PY'
 import csv
 import pathlib
 import sys
@@ -329,6 +364,8 @@ from collections import defaultdict
 
 csv_path = pathlib.Path(sys.argv[1])
 md_path = pathlib.Path(sys.argv[2])
+skip_tc = sys.argv[3] == "1"
+bandwidth = sys.argv[4]
 
 rows = list(csv.DictReader(csv_path.open()))
 grouped = defaultdict(dict)
@@ -342,12 +379,20 @@ parties = sorted({int(r["num_parties"]) for r in rows})
 lines = []
 lines.append("# Table III Summary")
 lines.append("")
-lines.append("Dependent integer multiplication under loopback `tc` shaping.")
+if skip_tc:
+    lines.append("Dependent integer multiplication on localhost with current network settings (`tc` shaping skipped).")
+else:
+    lines.append("Dependent integer multiplication under loopback `tc` shaping.")
 lines.append("")
 
 for delay in delays:
     rtt = delay * 2
-    lines.append(f"## 100mbit, one-way delay {delay} ms (approx RTT {rtt} ms)")
+    if skip_tc:
+        lines.append(
+            f"## Requested case: {bandwidth}, one-way delay {delay} ms (`tc` skipped; actual local network unchanged)"
+        )
+    else:
+        lines.append(f"## {bandwidth}, one-way delay {delay} ms (approx RTT {rtt} ms)")
     lines.append("")
     lines.append("| n | Asterisk-DH Off Comm (MB) | Asterisk-DH Off Time (s) | Asterisk-DH On Comm (MB) | Asterisk-DH On Time (s) | Ours-SH Off Comm (MB) | Ours-SH Off Time (s) | Ours-SH On Comm (MB) | Ours-SH On Time (s) | Ours-DH Off Comm (MB) | Ours-DH Off Time (s) | Ours-DH On Comm (MB) | Ours-DH On Time (s) |")
     lines.append("|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
