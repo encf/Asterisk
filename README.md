@@ -20,7 +20,7 @@
 | Integer multiplication | `benchmark/asterisk2_mpc.cpp`, `benchmark/asterisk_offline.cpp`, `benchmark/asterisk_online.cpp` | `scripts/compare_mul_protocols.sh` |
 | Comparison | `benchmark/asterisk2_bgtez.cpp`, `benchmark/asterisk_cmp_offline.cpp`, `benchmark/asterisk_cmp_online.cpp` | `scripts/compare_cmp_protocols.sh` |
 | Equality testing | `benchmark/asterisk2_eqz.cpp` | `scripts/compare_eqz_a2.sh`, `scripts/check_eqz_a2.sh` |
-| Fixed-point multiplication | `benchmark/asterisk2_mpc.cpp` with truncation enabled | `scripts/compare_fixedpoint_mul_a2.sh` |
+| Fixed-point multiplication | `benchmark/asterisk2_mpc.cpp` with truncation enabled | `scripts/compare_fixedpoint_mul_a2.sh`, `scripts/run_fixedpoint_mul_tc.sh` |
 | Standalone truncation | `benchmark/asterisk2_mpc.cpp` with truncation enabled | `scripts/compare_truncation_a2.sh`, `scripts/run_truncation_tc_matrix.sh` |
 | Dark-pool volume matching | `benchmark/asterisk2_darkpool_vm.cpp`, baseline `benchmark/Darkpool_VM.cpp` | `scripts/compare_vm_protocols.sh` |
 | Dark-pool continuous double auction | `benchmark/asterisk2_darkpool_cda.cpp`, baseline `benchmark/Darkpool_CDA.cpp` | `scripts/compare_cda_protocols.sh` |
@@ -30,7 +30,7 @@
 ```sh
 ./scripts/compare_mul_protocols.sh -n 3 -d 10 -r 3
 ./scripts/compare_cmp_protocols.sh -n 3 -c 20
-./scripts/compare_fixedpoint_mul_a2.sh -n 3 -c 20
+sudo bash ./scripts/run_fixedpoint_mul_tc.sh
 ./scripts/run_truncation_tc_matrix.sh
 ./scripts/compare_vm_protocols.sh
 ./scripts/compare_cda_protocols.sh
@@ -55,7 +55,7 @@ These scripts write raw per-party JSON outputs and aggregated summaries under `r
 | 整数乘法 | `benchmark/asterisk2_mpc.cpp`，以及基线 `benchmark/asterisk_offline.cpp` / `benchmark/asterisk_online.cpp` | `scripts/compare_mul_protocols.sh` |
 | 比较协议 | `benchmark/asterisk2_bgtez.cpp`，以及基线 `benchmark/asterisk_cmp_offline.cpp` / `benchmark/asterisk_cmp_online.cpp` | `scripts/compare_cmp_protocols.sh` |
 | 等式测试 | `benchmark/asterisk2_eqz.cpp` | `scripts/compare_eqz_a2.sh`，`scripts/check_eqz_a2.sh` |
-| 定点数乘法 | `benchmark/asterisk2_mpc.cpp` 开启 truncation 参数 | `scripts/compare_fixedpoint_mul_a2.sh` |
+| 定点数乘法 | `benchmark/asterisk2_mpc.cpp` 开启 truncation 参数 | `scripts/compare_fixedpoint_mul_a2.sh`，`scripts/run_fixedpoint_mul_tc.sh` |
 | 独立截断 | `benchmark/asterisk2_mpc.cpp` 开启 truncation 参数 | `scripts/compare_truncation_a2.sh`，`scripts/run_truncation_tc_matrix.sh` |
 | Dark-pool VM | `benchmark/asterisk2_darkpool_vm.cpp`，基线为 `benchmark/Darkpool_VM.cpp` | `scripts/compare_vm_protocols.sh` |
 | Dark-pool CDA | `benchmark/asterisk2_darkpool_cda.cpp`，基线为 `benchmark/Darkpool_CDA.cpp` | `scripts/compare_cda_protocols.sh` |
@@ -65,7 +65,7 @@ These scripts write raw per-party JSON outputs and aggregated summaries under `r
 ```sh
 ./scripts/compare_mul_protocols.sh -n 3 -d 10 -r 3
 ./scripts/compare_cmp_protocols.sh -n 3 -c 20
-./scripts/compare_fixedpoint_mul_a2.sh -n 3 -c 20
+sudo bash ./scripts/run_fixedpoint_mul_tc.sh
 ./scripts/run_truncation_tc_matrix.sh
 ./scripts/compare_vm_protocols.sh
 ./scripts/compare_cda_protocols.sh
@@ -258,9 +258,27 @@ tc qdisc show dev eth0
 
 参数说明：
 - `-n/--num-parties`：计算方数量
-- `-c/--fixed-mul-count`：定点数乘法次数
+- `-c/--fixed-mul-count`：连续定点数乘法链的长度，也就是 benchmark depth
 - `--frac-bits`：截断的小数位数 m
 - `--ell-x`、`--slack`：截断参数
+
+新增 wrapper：`scripts/run_fixedpoint_mul_tc.sh`，会自动：
+- 在 `lo` 上配置 `tc/netem`
+- 默认顺序跑 `20 ms` 和 `50 ms` 两个 one-way delay case
+- 默认带宽固定为 `100mbit`
+- 默认 `n=5`
+- 默认每个 case 跑一条深度为 `1000` 的连续定点数乘法链
+
+```sh
+# 默认跑 20ms 和 50ms 两个 case
+sudo bash ./scripts/run_fixedpoint_mul_tc.sh
+
+# 只跑 50ms
+sudo bash ./scripts/run_fixedpoint_mul_tc.sh --delay 50
+
+# 查看参数
+./scripts/run_fixedpoint_mul_tc.sh --help
+```
 
 ### 11) 独立截断（standalone truncation）benchmark 脚本
 新增脚本：`scripts/compare_truncation_a2.sh`，用于单独测量 Asterisk2.0 的 arithmetic-domain probabilistic truncation，对比：

@@ -90,8 +90,8 @@ sudo bash ./scripts/run_fixedpoint_mul_tc.sh --out-dir run_logs/test_fixedpoint_
   - `run_logs/test_fixedpoint_paper/fixedmul_owd_20ms_n5/raw/semi-honest/p*.json`
   - `run_logs/test_fixedpoint_paper/fixedmul_owd_50ms_n5/compare_output.txt`
   - `run_logs/test_fixedpoint_paper/fixedmul_owd_50ms_n5/raw/malicious/p*.json`
-- Notes: this command runs both paper latency cases for the fixed-point benchmark, namely `100mbit`, one-way delay `20ms` and `50ms`, `n=5`, and 1,000 consecutive fixed-point multiplications per case. Per-party execution logs are written under each case directory's `raw/*/logs/` subdirectory.
-- Operational detail: `run_fixedpoint_mul_tc.sh` configures `tc` on `lo` for each delay case in sequence, records the network snapshot, and launches the semi-honest and malicious sub-runs through `compare_fixedpoint_mul_a2.sh`.
+- Notes: this command runs both paper latency cases for the fixed-point benchmark, namely `100mbit`, one-way delay `20ms` and `50ms`, `n=5`, and one benchmark run with a chain of 1,000 fixed-point multiplications per case. Per-party execution logs are written under each case directory's `raw/*/logs/` subdirectory.
+- Operational detail: `run_fixedpoint_mul_tc.sh` configures `tc` on `lo` for each delay case in sequence, records the network snapshot, and launches the semi-honest and malicious sub-runs through `compare_fixedpoint_mul_a2.sh`, which maps `-c/--fixed-mul-count` to circuit depth with `gates-per-level=1` and `repeat=1`.
 
 ### Section: probabilistic truncation
 

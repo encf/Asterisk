@@ -90,8 +90,8 @@ sudo bash ./scripts/run_fixedpoint_mul_tc.sh --out-dir run_logs/test_fixedpoint_
   - `run_logs/test_fixedpoint_paper/fixedmul_owd_20ms_n5/raw/semi-honest/p*.json`
   - `run_logs/test_fixedpoint_paper/fixedmul_owd_50ms_n5/compare_output.txt`
   - `run_logs/test_fixedpoint_paper/fixedmul_owd_50ms_n5/raw/malicious/p*.json`
-- 说明：该命令会把定点数乘法的两个论文时延 case 都跑掉，也就是 `100mbit`、单向时延 `20ms` 和 `50ms`、`n=5`，且每个 case 都执行 1,000 次连续定点数乘法。每个参与方的执行日志会写到各 case 目录下的 `raw/*/logs/` 子目录。
-- 运行机制：`run_fixedpoint_mul_tc.sh` 会按顺序在 `lo` 上配置每个时延 case 的 `tc`，保存网络快照，再通过 `compare_fixedpoint_mul_a2.sh` 拉起 semi-honest 和 malicious 两段子实验。
+- 说明：该命令会把定点数乘法的两个论文时延 case 都跑掉，也就是 `100mbit`、单向时延 `20ms` 和 `50ms`、`n=5`，且每个 case 都执行一条深度为 1,000 的连续定点数乘法链。每个参与方的执行日志会写到各 case 目录下的 `raw/*/logs/` 子目录。
+- 运行机制：`run_fixedpoint_mul_tc.sh` 会按顺序在 `lo` 上配置每个时延 case 的 `tc`，保存网络快照，再通过 `compare_fixedpoint_mul_a2.sh` 拉起 semi-honest 和 malicious 两段子实验；现在 `-c/--fixed-mul-count` 表示电路深度，固定使用 `gates-per-level=1` 和 `repeat=1`。
 
 ### 小节：概率截断
 

@@ -19,13 +19,13 @@ usage() {
 Usage: scripts/compare_fixedpoint_mul_a2.sh [options]
 
 Compare Asterisk2.0 fixed-point multiplication
-  (one integer multiplication + one truncation) across:
+  (one continuous chain of integer multiplication + truncation) across:
   - semi-honest
   - malicious
 
 Options:
   -n, --num-parties <int>       Number of computing parties (default: 5)
-  -c, --fixed-mul-count <int>   Number of fixed-point multiplications (default: 1000)
+  -c, --fixed-mul-count <int>   Number of continuous fixed-point multiplications / depth (default: 1000)
   --frac-bits <int>             Fractional bits m for truncation (default: 8)
   --ell-x <int>                 Truncation ell_x (default: 40)
   --slack <int>                 Truncation slack s (default: 8)
@@ -70,7 +70,7 @@ run_model() {
   echo "[RUN] model=${model}, fixed_mul_count=${FIXED_MUL_COUNT}, port=${port}"
   localhost_run_multiparty_group "${run_dir}" "${N}" "${port}" "${PORT_STRIDE}" \
     "${BUILD_DIR}/benchmarks/asterisk2_mpc" \
-    -g 1 -d 1 -r "${FIXED_MUL_COUNT}" \
+    -g 1 -d "${FIXED_MUL_COUNT}" -r 1 \
     --security-model "${model}" \
     --trunc-frac-bits "${FRAC_BITS}" --trunc-lx "${ELL_X}" --trunc-slack "${SLACK}"
   echo "[DONE] model=${model}"
@@ -98,12 +98,15 @@ def load_model(model):
 def summarize(model):
     parties = load_model(model)
     reps = len(parties[0]["benchmarks"])
+    gates_per_level = int(parties[0]["details"]["gates_per_level"])
+    depth = int(parties[0]["details"]["depth"])
+    fixed_mul_count = gates_per_level * depth
     off_comm = []
     off_time = []
     on_comm = []
     on_time = []
     for r in range(reps):
-      # one fixed-point multiplication := mul + truncation
+      # one benchmark row := one fixed-point multiplication chain
       off_b = 0
       on_b = 0
       off_t_ms = 0.0
@@ -118,16 +121,19 @@ def summarize(model):
       on_comm.append(on_b / MB)
       off_time.append(off_t_ms / 1000.0)
       on_time.append(on_t_ms / 1000.0)
-    return statistics.mean(off_comm), statistics.mean(off_time), statistics.mean(on_comm), statistics.mean(on_time)
+    return gates_per_level, depth, fixed_mul_count, statistics.mean(off_comm), statistics.mean(off_time), statistics.mean(on_comm), statistics.mean(on_time)
 
 sh = summarize("semi-honest")
 mal = summarize("malicious")
+gates_per_level = sh[0]
+depth = sh[1]
+fixed_mul_count = sh[2]
 
-print("\n=== Asterisk2.0 Fixed-Point Multiplication (mul + trunc) ===")
+print(f"\n=== Asterisk2.0 Fixed-Point Multiplication Chain ({fixed_mul_count} mul + trunc, g={gates_per_level}, d={depth}) ===")
 print("| Security Model | Offline Comm (MB) | Offline Time (s) | Online Comm (MB) | Online Time (s) |")
 print("|---|---:|---:|---:|---:|")
-print(f"| semi-honest | {sh[0]:.6f} | {sh[1]:.6f} | {sh[2]:.6f} | {sh[3]:.6f} |")
-print(f"| malicious | {mal[0]:.6f} | {mal[1]:.6f} | {mal[2]:.6f} | {mal[3]:.6f} |")
+print(f"| semi-honest | {sh[3]:.6f} | {sh[4]:.6f} | {sh[5]:.6f} | {sh[6]:.6f} |")
+print(f"| malicious | {mal[3]:.6f} | {mal[4]:.6f} | {mal[5]:.6f} | {mal[6]:.6f} |")
 PY
 
 echo
