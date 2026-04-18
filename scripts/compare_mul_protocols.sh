@@ -73,18 +73,15 @@ WIDTH = int(sys.argv[1])
 STRIDE = 16
 
 def range_is_free(base):
-    sockets = []
-    try:
-        for port in range(base, base + WIDTH):
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    for port in range(base, base + WIDTH):
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
             s.bind(("0.0.0.0", port))
-            sockets.append(s)
-        return True
-    except OSError:
-        return False
-    finally:
-        for s in sockets:
+        except OSError:
             s.close()
+            return False
+        s.close()
+    return True
 
 for base in range(START, END - WIDTH + 1, STRIDE):
     if range_is_free(base):
@@ -107,17 +104,12 @@ width = int(sys.argv[2])
 if base < 1024 or base + width - 1 > 65535:
     raise SystemExit(f"Invalid base port {base}: need a free range up to {base + width - 1} within 1024..65535")
 
-sockets = []
 try:
     for port in range(base, base + width):
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.bind(("0.0.0.0", port))
-        sockets.append(s)
 except OSError as exc:
     raise SystemExit(f"Base port {base} is not usable: {exc}")
-finally:
-    for s in sockets:
-        s.close()
 PY
 }
 
