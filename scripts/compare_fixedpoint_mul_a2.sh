@@ -18,14 +18,14 @@ usage() {
   cat <<'EOF'
 Usage: scripts/compare_fixedpoint_mul_a2.sh [options]
 
-Compare Asterisk2.0 fixed-point multiplication
-  (one continuous chain of integer multiplication + truncation) across:
+Compare the scalar Asterisk2.0 fixed-point multiplication APIs
+  (`fixed_point_mul_online_semi_honest` and `fixed_point_mul_online_malicious`) across:
   - semi-honest
   - malicious
 
 Options:
   -n, --num-parties <int>       Number of computing parties (default: 5)
-  -c, --fixed-mul-count <int>   Number of continuous fixed-point multiplications / depth (default: 1000)
+  -c, --fixed-mul-count <int>   Number of scalar fixed-point multiplication calls inside one benchmark repetition (default: 1000)
   --frac-bits <int>             Fractional bits m for truncation (default: 8)
   --ell-x <int>                 Truncation ell_x (default: 40)
   --slack <int>                 Truncation slack s (default: 8)
@@ -59,7 +59,7 @@ if [[ ! -f "${BUILD_DIR}/CMakeCache.txt" ]]; then
   cmake -S "${ROOT_DIR}" -B "${BUILD_DIR}" -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache >/dev/null
 fi
-cmake --build "${BUILD_DIR}" -j"$(nproc)" --target asterisk2_mpc >/dev/null
+cmake --build "${BUILD_DIR}" -j"$(nproc)" --target asterisk2_fixedpoint_mul_check >/dev/null
 
 run_model() {
   local model="$1"
@@ -69,10 +69,10 @@ run_model() {
   SEARCH_PORT=$((port + PORT_STRIDE))
   echo "[RUN] model=${model}, fixed_mul_count=${FIXED_MUL_COUNT}, port=${port}"
   localhost_run_multiparty_group "${run_dir}" "${N}" "${port}" "${PORT_STRIDE}" \
-    "${BUILD_DIR}/benchmarks/asterisk2_mpc" \
-    -g 1 -d "${FIXED_MUL_COUNT}" -r 1 \
+    "${BUILD_DIR}/benchmarks/asterisk2_fixedpoint_mul_check" \
+    --batch-size 1 --scalar-call-count "${FIXED_MUL_COUNT}" --scalar-only -r 1 \
     --security-model "${model}" \
-    --trunc-frac-bits "${FRAC_BITS}" --trunc-lx "${ELL_X}" --trunc-slack "${SLACK}"
+    --frac-bits "${FRAC_BITS}" --ell-x "${ELL_X}" --slack "${SLACK}"
   echo "[DONE] model=${model}"
 }
 
@@ -98,42 +98,47 @@ def load_model(model):
 def summarize(model):
     parties = load_model(model)
     reps = len(parties[0]["benchmarks"])
-    gates_per_level = int(parties[0]["details"]["gates_per_level"])
-    depth = int(parties[0]["details"]["depth"])
-    fixed_mul_count = gates_per_level * depth
+    calls_per_benchmark = int(parties[0]["details"].get("scalar_total_calls_per_benchmark", 1))
     off_comm = []
     off_time = []
     on_comm = []
     on_time = []
     for r in range(reps):
-      # one benchmark row := one fixed-point multiplication chain
       off_b = 0
       on_b = 0
       off_t_ms = 0.0
       on_t_ms = 0.0
       for pid in range(n + 1):
         row = parties[pid]["benchmarks"][r]
-        off_b += int(row["offline_bytes"]) + int(row["truncation_offline_bytes"])
-        on_b += int(row["online_bytes"]) + int(row["truncation_bytes"])
-        off_t_ms = max(off_t_ms, float(row["offline"]["time"]) + float(row["truncation_offline"]["time"]))
-        on_t_ms = max(on_t_ms, float(row["online"]["time"]) + float(row["truncation"]["time"]))
+        off_b += sum(int(v) for v in row["scalar_offline"]["communication"])
+        on_b += sum(int(v) for v in row["scalar_online"]["communication"])
+        off_t_ms = max(off_t_ms, float(row["scalar_offline"]["time"]))
+        on_t_ms = max(on_t_ms, float(row["scalar_online"]["time"]))
       off_comm.append(off_b / MB)
       on_comm.append(on_b / MB)
       off_time.append(off_t_ms / 1000.0)
       on_time.append(on_t_ms / 1000.0)
-    return gates_per_level, depth, fixed_mul_count, statistics.mean(off_comm), statistics.mean(off_time), statistics.mean(on_comm), statistics.mean(on_time)
+    mean_off_s = statistics.mean(off_time)
+    mean_on_s = statistics.mean(on_time)
+    return {
+        "calls_per_benchmark": calls_per_benchmark,
+        "offline_comm_mb": statistics.mean(off_comm),
+        "offline_time_s": mean_off_s,
+        "online_comm_mb": statistics.mean(on_comm),
+        "online_time_s": mean_on_s,
+        "offline_time_per_call_ms": (mean_off_s * 1000.0) / calls_per_benchmark,
+        "online_time_per_call_ms": (mean_on_s * 1000.0) / calls_per_benchmark,
+    }
 
 sh = summarize("semi-honest")
 mal = summarize("malicious")
-gates_per_level = sh[0]
-depth = sh[1]
-fixed_mul_count = sh[2]
+fixed_mul_count = sh["calls_per_benchmark"]
 
-print(f"\n=== Asterisk2.0 Fixed-Point Multiplication Chain ({fixed_mul_count} mul + trunc, g={gates_per_level}, d={depth}) ===")
-print("| Security Model | Offline Comm (MB) | Offline Time (s) | Online Comm (MB) | Online Time (s) |")
-print("|---|---:|---:|---:|---:|")
-print(f"| semi-honest | {sh[3]:.6f} | {sh[4]:.6f} | {sh[5]:.6f} | {sh[6]:.6f} |")
-print(f"| malicious | {mal[3]:.6f} | {mal[4]:.6f} | {mal[5]:.6f} | {mal[6]:.6f} |")
+print(f"\n=== Asterisk2.0 Scalar Fixed-Point Multiplication ({fixed_mul_count} sequential calls per benchmark) ===")
+print("| Security Model | Offline Comm (MB) | Offline Time (s) | Offline Per Call (ms) | Online Comm (MB) | Online Time (s) | Online Per Call (ms) |")
+print("|---|---:|---:|---:|---:|---:|---:|")
+print(f"| semi-honest | {sh['offline_comm_mb']:.6f} | {sh['offline_time_s']:.6f} | {sh['offline_time_per_call_ms']:.6f} | {sh['online_comm_mb']:.6f} | {sh['online_time_s']:.6f} | {sh['online_time_per_call_ms']:.6f} |")
+print(f"| malicious | {mal['offline_comm_mb']:.6f} | {mal['offline_time_s']:.6f} | {mal['offline_time_per_call_ms']:.6f} | {mal['online_comm_mb']:.6f} | {mal['online_time_s']:.6f} | {mal['online_time_per_call_ms']:.6f} |")
 PY
 
 echo

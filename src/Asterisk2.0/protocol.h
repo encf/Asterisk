@@ -63,6 +63,39 @@ struct AuthTruncResult {
   std::vector<Field> trunc_delta_x_shares;
 };
 
+struct FixedPointBatchMulOfflineData {
+  MulOfflineData mul_data;
+  TruncOfflineData trunc_data;
+  bool ready{false};
+};
+
+struct FixedPointBatchMulResult {
+  std::vector<Field> shares;
+  std::vector<Field> delta_shares;
+};
+
+struct FixedPointMulOfflineData {
+  TripleShare triple;
+  MulAuthTupleShare auth_tuple;
+  Field delta_share{Field(0)};
+  Field delta_inv_share{Field(0)};
+  Field helper_delta{Field(0)};
+  Field helper_delta_inv{Field(0)};
+  size_t ell_x{0};
+  size_t m{0};
+  size_t s{0};
+  Field r_share{Field(0)};
+  Field r0_share{Field(0)};
+  Field delta_r_share{Field(0)};
+  Field delta_r0_share{Field(0)};
+  bool ready{false};
+};
+
+struct FixedPointMulResult {
+  Field share{Field(0)};
+  Field delta_share{Field(0)};
+};
+
 struct BatchedTruncOfflineData {
   size_t lx{0};
   size_t s{0};
@@ -172,6 +205,42 @@ class Protocol {
   AuthTruncResult trunc_online_malicious(const std::vector<Field>& x_shares,
                                          const std::vector<Field>& delta_x_shares,
                                          const TruncOfflineData& offline_data);
+  FixedPointBatchMulOfflineData fixed_point_batch_mul_offline_semi_honest(size_t batch_size,
+                                                                          size_t ell_x, size_t m,
+                                                                          size_t s);
+  FixedPointBatchMulResult fixed_point_batch_mul_online_semi_honest(
+      const std::vector<Field>& x_shares, const std::vector<Field>& y_shares,
+      const FixedPointBatchMulOfflineData& offline_data);
+  FixedPointBatchMulOfflineData fixed_point_batch_mul_offline_malicious(size_t batch_size,
+                                                                        size_t ell_x, size_t m,
+                                                                        size_t s);
+  FixedPointBatchMulResult fixed_point_batch_mul_online_malicious(
+      const std::vector<Field>& x_shares, const std::vector<Field>& delta_x_shares,
+      const std::vector<Field>& y_shares, const std::vector<Field>& delta_y_shares,
+      const FixedPointBatchMulOfflineData& offline_data);
+  FixedPointBatchMulOfflineData fixed_point_batch_mul_offline(size_t batch_size, size_t ell_x,
+                                                              size_t m, size_t s);
+  FixedPointBatchMulResult fixed_point_batch_mul_online(
+      const std::vector<Field>& x_shares, const std::vector<Field>& y_shares,
+      const FixedPointBatchMulOfflineData& offline_data);
+  FixedPointBatchMulResult fixed_point_batch_mul_online(
+      const std::vector<Field>& x_shares, const std::vector<Field>& delta_x_shares,
+      const std::vector<Field>& y_shares, const std::vector<Field>& delta_y_shares,
+      const FixedPointBatchMulOfflineData& offline_data);
+  FixedPointMulOfflineData fixed_point_mul_offline_semi_honest(size_t ell_x, size_t m, size_t s);
+  FixedPointMulResult fixed_point_mul_online_semi_honest(
+      const Field& x_share, const Field& y_share, const FixedPointMulOfflineData& offline_data);
+  FixedPointMulOfflineData fixed_point_mul_offline_malicious(size_t ell_x, size_t m, size_t s);
+  FixedPointMulResult fixed_point_mul_online_malicious(
+      const Field& x_share, const Field& delta_x_share, const Field& y_share,
+      const Field& delta_y_share, const FixedPointMulOfflineData& offline_data);
+  FixedPointMulOfflineData fixed_point_mul_offline(size_t ell_x, size_t m, size_t s);
+  FixedPointMulResult fixed_point_mul_online(
+      const Field& x_share, const Field& y_share, const FixedPointMulOfflineData& offline_data);
+  FixedPointMulResult fixed_point_mul_online(
+      const Field& x_share, const Field& delta_x_share, const Field& y_share,
+      const Field& delta_y_share,
+      const FixedPointMulOfflineData& offline_data);
   CompareOfflineData compare_offline(size_t lx, size_t s,
                                      bool force_t = false, bool forced_t_value = false);
   CompareOfflineData compare_offline_tagged(size_t lx, size_t s, uint64_t domain_sep,
@@ -250,7 +319,11 @@ class Protocol {
   Field openToComputingParties(const Field& local_share) const;
   std::vector<Field> openVectorToComputingParties(const std::vector<Field>& local_vec) const;
   MulOfflineData mul_offline_semi_honest(const std::vector<FIn2Gate>& mul_gates);
+  MulOfflineData mul_offline_semi_honest(const std::vector<FIn2Gate>& mul_gates,
+                                         uint64_t idx_base);
   MulOfflineData mul_offline_malicious(const std::vector<FIn2Gate>& mul_gates);
+  MulOfflineData mul_offline_malicious(const std::vector<FIn2Gate>& mul_gates,
+                                       uint64_t idx_base);
   std::vector<Field> mul_online_semi_honest(
       const std::unordered_map<wire_t, Field>& inputs, const MulOfflineData& offline_data);
   std::vector<Field> mul_online_malicious(
@@ -258,6 +331,10 @@ class Protocol {
   MaliciousInputShareData buildMaliciousInputShares(
       const std::unordered_map<wire_t, Field>& inputs, const MulOfflineData& offline_data);
   void verifyMaliciousKeyMaterial(const MulOfflineData& offline_data) const;
+  TruncOfflineData trunc_offline_internal(size_t batch_size, size_t ell_x, size_t m, size_t s,
+                                          uint64_t idx_base);
+  TruncOfflineData trunc_offline_malicious_internal(size_t batch_size, size_t ell_x, size_t m,
+                                                    size_t s, uint64_t idx_base);
   CompareOfflineData compare_offline_internal(size_t lx, size_t s, bool force_t,
                                               bool forced_t_value, uint64_t domain_sep);
   CompareOfflineDataMalicious compare_offline_malicious_internal(size_t lx, size_t s,
@@ -286,6 +363,7 @@ class Protocol {
   Field malicious_delta_inv_share_{Field(0)};
   Field helper_delta_{Field(0)};
   Field helper_delta_inv_{Field(0)};
+  uint64_t fixed_point_offline_counter_{0};
 };
 
 }  // namespace asterisk2

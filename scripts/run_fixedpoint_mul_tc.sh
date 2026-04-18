@@ -25,15 +25,15 @@ Usage: scripts/run_fixedpoint_mul_tc.sh [options]
 Configure loopback tc/netem and run the fixed-point multiplication benchmark
 across one or more one-way delay settings.
 
-By default this wrapper runs both paper latency cases:
+By default this wrapper runs the scalar fixed-point latency cases:
   - one-way delay: 20ms, 50ms
   - bandwidth: 100mbit
   - participants: 5
-  - fixed-point multiplications: 1000
+  - scalar fixed-point multiplication calls: 1000
 
 Options:
   -n, --num-parties <int>       Number of computing parties (default: 5)
-  -c, --fixed-mul-count <int>   Number of fixed-point multiplications (default: 1000)
+  -c, --fixed-mul-count <int>   Number of scalar fixed-point calls inside one benchmark repetition (default: 1000)
   --frac-bits <int>             Fractional bits m for truncation (default: 8)
   --ell-x <int>                 Truncation ell_x (default: 40)
   --slack <int>                 Truncation slack s (default: 8)
@@ -51,7 +51,7 @@ Options:
 Examples:
   ./scripts/run_fixedpoint_mul_tc.sh
   ./scripts/run_fixedpoint_mul_tc.sh --delay 50
-  ./scripts/run_fixedpoint_mul_tc.sh --delays 20,50 --label fixedmul_paper
+  ./scripts/run_fixedpoint_mul_tc.sh --delays 20,50 --label fixedmul_scalar
 EOF
 }
 

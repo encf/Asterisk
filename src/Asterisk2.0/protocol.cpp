@@ -247,12 +247,17 @@ MulOfflineData Protocol::mul_offline() {
 }
 
 MulOfflineData Protocol::mul_offline_semi_honest(const std::vector<FIn2Gate>& mul_gates) {
+  return mul_offline_semi_honest(mul_gates, 0);
+}
+
+MulOfflineData Protocol::mul_offline_semi_honest(const std::vector<FIn2Gate>& mul_gates,
+                                                 uint64_t idx_base) {
   MulOfflineData out;
   out.triples.resize(mul_gates.size());
   if (id_ <= nP_ - 2) {
     const auto pairwise_key = key_manager_.keyWithHelper();
     for (size_t g = 0; g < mul_gates.size(); ++g) {
-      auto prg = makePrgFromPairwiseKey(pairwise_key, g, PrgLabel::kMulShare);
+      auto prg = makePrgFromPairwiseKey(pairwise_key, idx_base + g, PrgLabel::kMulShare);
       out.triples[g].a = prgField(prg);
       out.triples[g].b = prgField(prg);
       out.triples[g].c = prgField(prg);
@@ -263,7 +268,8 @@ MulOfflineData Protocol::mul_offline_semi_honest(const std::vector<FIn2Gate>& mu
 
   if (id_ == helper_id_) {
     for (size_t g = 0; g < mul_gates.size(); ++g) {
-      auto helper_prg = makePrg(seed_, helper_id_, g, PrgLabel::kMulHelper);
+      const auto prg_idx = idx_base + g;
+      auto helper_prg = makePrg(seed_, helper_id_, prg_idx, PrgLabel::kMulHelper);
       Field a = prgField(helper_prg);
       Field b = prgField(helper_prg);
       Field c = a * b;
@@ -272,7 +278,8 @@ MulOfflineData Protocol::mul_offline_semi_honest(const std::vector<FIn2Gate>& mu
       Field sum_b = Field(0);
       Field sum_c = Field(0);
       for (int i = 0; i <= nP_ - 2; ++i) {
-        auto pprg = makePrgFromPairwiseKey(key_manager_.keyForParty(i), g, PrgLabel::kMulShare);
+        auto pprg =
+            makePrgFromPairwiseKey(key_manager_.keyForParty(i), prg_idx, PrgLabel::kMulShare);
         sum_a += prgField(pprg);
         sum_b += prgField(pprg);
         sum_c += prgField(pprg);
@@ -299,6 +306,11 @@ MulOfflineData Protocol::mul_offline_semi_honest(const std::vector<FIn2Gate>& mu
 }
 
 MulOfflineData Protocol::mul_offline_malicious(const std::vector<FIn2Gate>& mul_gates) {
+  return mul_offline_malicious(mul_gates, 0);
+}
+
+MulOfflineData Protocol::mul_offline_malicious(const std::vector<FIn2Gate>& mul_gates,
+                                               uint64_t idx_base) {
   if (!malicious_mac_setup_ready_) {
     throw std::runtime_error("malicious MAC setup not initialized");
   }
@@ -308,7 +320,8 @@ MulOfflineData Protocol::mul_offline_malicious(const std::vector<FIn2Gate>& mul_
   if (id_ <= nP_ - 2) {
     const auto pairwise = key_manager_.keyWithHelper();
     for (size_t g = 0; g < mul_gates.size(); ++g) {
-      auto prg = makePrgFromPairwiseKey(pairwise, g, PrgLabel::kMulMaliciousShare);
+      auto prg =
+          makePrgFromPairwiseKey(pairwise, idx_base + g, PrgLabel::kMulMaliciousShare);
       out.triples[g].a = prgField(prg);
       out.triples[g].b = prgField(prg);
       out.triples[g].c = prgField(prg);
@@ -323,7 +336,8 @@ MulOfflineData Protocol::mul_offline_malicious(const std::vector<FIn2Gate>& mul_
   } else if (id_ == helper_id_) {
     std::vector<Field> batch_pack(10 * mul_gates.size(), Field(0));
     for (size_t g = 0; g < mul_gates.size(); ++g) {
-      auto helper_prg = makePrg(seed_, helper_id_, g, PrgLabel::kMulMaliciousHelper);
+      const auto prg_idx = idx_base + g;
+      auto helper_prg = makePrg(seed_, helper_id_, prg_idx, PrgLabel::kMulMaliciousHelper);
       const Field a = prgField(helper_prg);
       const Field b = prgField(helper_prg);
       const Field a_prime = prgField(helper_prg);
@@ -346,7 +360,7 @@ MulOfflineData Protocol::mul_offline_malicious(const std::vector<FIn2Gate>& mul_
       Field sum_b_prime_c_prime = Field(0);
       Field sum_a_prime_b_prime_c_prime = Field(0);
       for (int i = 0; i <= nP_ - 2; ++i) {
-        auto pprg = makePrgFromPairwiseKey(key_manager_.keyForParty(i), g,
+        auto pprg = makePrgFromPairwiseKey(key_manager_.keyForParty(i), prg_idx,
                                            PrgLabel::kMulMaliciousShare);
         sum_a += prgField(pprg);
         sum_b += prgField(pprg);
@@ -754,8 +768,13 @@ void Protocol::verifyMaliciousKeyMaterial(const MulOfflineData& offline_data) co
 
 TruncOfflineData Protocol::trunc_offline(size_t batch_size, size_t ell_x, size_t m, size_t s) {
   if (config_.security_model == SecurityModel::kMalicious) {
-    return trunc_offline_malicious(batch_size, ell_x, m, s);
+    return trunc_offline_malicious_internal(batch_size, ell_x, m, s, 0);
   }
+  return trunc_offline_internal(batch_size, ell_x, m, s, 0);
+}
+
+TruncOfflineData Protocol::trunc_offline_internal(size_t batch_size, size_t ell_x, size_t m,
+                                                  size_t s, uint64_t idx_base) {
   if (id_ > helper_id_) {
     return {};
   }
@@ -778,14 +797,15 @@ TruncOfflineData Protocol::trunc_offline(size_t batch_size, size_t ell_x, size_t
 
   if (id_ == helper_id_) {
     for (size_t idx = 0; idx < batch_size; ++idx) {
-      auto helper_prg = makePrg(seed_, helper_id_, idx, PrgLabel::kTruncHelper);
+      const auto prg_idx = idx_base + idx;
+      auto helper_prg = makePrg(seed_, helper_id_, prg_idx, PrgLabel::kTruncHelper);
       Field r = prgFieldBounded(helper_prg, bound_r);
       Field r0 = prgFieldBounded(helper_prg, bound_r0);
 
       Field sum_r = Field(0);
       Field sum_r0 = Field(0);
       for (int i = 0; i <= nP_ - 2; ++i) {
-        auto pprg = makePrgFromPairwiseKey(key_manager_.keyForParty(i), idx,
+        auto pprg = makePrgFromPairwiseKey(key_manager_.keyForParty(i), prg_idx,
                                            PrgLabel::kTruncShare);
         sum_r += prgFieldBounded(pprg, bound_r);
         sum_r0 += prgFieldBounded(pprg, bound_r0);
@@ -802,7 +822,8 @@ TruncOfflineData Protocol::trunc_offline(size_t batch_size, size_t ell_x, size_t
   if (id_ <= nP_ - 2) {
     const auto pairwise_key = key_manager_.keyWithHelper();
     for (size_t idx = 0; idx < batch_size; ++idx) {
-      auto pprg = makePrgFromPairwiseKey(pairwise_key, idx, PrgLabel::kTruncShare);
+      auto pprg =
+          makePrgFromPairwiseKey(pairwise_key, idx_base + idx, PrgLabel::kTruncShare);
       off.r_share[idx] = prgFieldBounded(pprg, bound_r);
       off.r0_share[idx] = prgFieldBounded(pprg, bound_r0);
     }
@@ -821,6 +842,12 @@ TruncOfflineData Protocol::trunc_offline(size_t batch_size, size_t ell_x, size_t
 
 TruncOfflineData Protocol::trunc_offline_malicious(size_t batch_size, size_t ell_x, size_t m,
                                                    size_t s) {
+  return trunc_offline_malicious_internal(batch_size, ell_x, m, s, 0);
+}
+
+TruncOfflineData Protocol::trunc_offline_malicious_internal(size_t batch_size, size_t ell_x,
+                                                            size_t m, size_t s,
+                                                            uint64_t idx_base) {
   if (id_ > helper_id_) {
     return {};
   }
@@ -848,7 +875,8 @@ TruncOfflineData Protocol::trunc_offline_malicious(size_t batch_size, size_t ell
 
   if (id_ == helper_id_) {
     for (size_t idx = 0; idx < batch_size; ++idx) {
-      auto helper_prg = makePrg(seed_, helper_id_, idx, PrgLabel::kTruncHelper);
+      const auto prg_idx = idx_base + idx;
+      auto helper_prg = makePrg(seed_, helper_id_, prg_idx, PrgLabel::kTruncHelper);
       const Field r = prgFieldBounded(helper_prg, bound_r);
       const Field r0 = prgFieldBounded(helper_prg, bound_r0);
       const Field delta_r = helper_delta_ * r;
@@ -860,7 +888,7 @@ TruncOfflineData Protocol::trunc_offline_malicious(size_t batch_size, size_t ell
       Field sum_delta_r0 = Field(0);
       for (int i = 0; i <= nP_ - 2; ++i) {
         const auto share =
-            deriveOfflineMaskShare(key_manager_.keyForParty(i), idx, bound_r, bound_r0);
+            deriveOfflineMaskShare(key_manager_.keyForParty(i), prg_idx, bound_r, bound_r0);
         sum_r += share[0];
         sum_r0 += share[1];
         sum_delta_r += share[2];
@@ -879,7 +907,8 @@ TruncOfflineData Protocol::trunc_offline_malicious(size_t batch_size, size_t ell
   if (id_ <= nP_ - 2) {
     const auto pairwise_key = key_manager_.keyWithHelper();
     for (size_t idx = 0; idx < batch_size; ++idx) {
-      const auto share = deriveOfflineMaskShare(pairwise_key, idx, bound_r, bound_r0);
+      const auto share =
+          deriveOfflineMaskShare(pairwise_key, idx_base + idx, bound_r, bound_r0);
       off.r_share[idx] = share[0];
       off.r0_share[idx] = share[1];
       off.delta_r_share[idx] = share[2];
@@ -1015,6 +1044,885 @@ AuthTruncResult Protocol::trunc_online_malicious(const std::vector<Field>& x_sha
   }
 
   return out;
+}
+
+FixedPointBatchMulOfflineData Protocol::fixed_point_batch_mul_offline_semi_honest(
+    size_t batch_size, size_t ell_x, size_t m, size_t s) {
+  FixedPointBatchMulOfflineData out;
+  constexpr uint64_t kFixedPointIdxStride = 1ULL << 20;
+  const uint64_t idx_base = fixed_point_offline_counter_++ * kFixedPointIdxStride;
+  if (config_.security_model != SecurityModel::kSemiHonest) {
+    throw std::runtime_error("fixed_point_batch_mul_offline_semi_honest requires semi-honest mode");
+  }
+  if (id_ > helper_id_) {
+    return out;
+  }
+  if (m == 0 || m > ell_x) {
+    throw std::runtime_error("fixed_point_batch_mul_offline_semi_honest requires 0 < m <= ell_x");
+  }
+  if (ell_x + s + 1 >= 64) {
+    throw std::runtime_error(
+        "fixed_point_batch_mul_offline_semi_honest requires ell_x + s + 1 < 64");
+  }
+
+  out.mul_data.triples.resize(batch_size);
+  out.trunc_data.ell_x = ell_x;
+  out.trunc_data.m = m;
+  out.trunc_data.s = s;
+  out.trunc_data.r_share.assign(batch_size, Field(0));
+  out.trunc_data.r0_share.assign(batch_size, Field(0));
+
+  const uint64_t bound_r = pow2Bound(ell_x - m + s);
+  const uint64_t bound_r0 = pow2Bound(m);
+
+  if (id_ <= nP_ - 2) {
+    const auto pairwise_key = key_manager_.keyWithHelper();
+    for (size_t idx = 0; idx < batch_size; ++idx) {
+      const uint64_t prg_idx = idx_base + idx;
+      auto mul_prg = makePrgFromPairwiseKey(pairwise_key, prg_idx, PrgLabel::kMulShare);
+      out.mul_data.triples[idx].a = prgField(mul_prg);
+      out.mul_data.triples[idx].b = prgField(mul_prg);
+      out.mul_data.triples[idx].c = prgField(mul_prg);
+
+      auto trunc_prg = makePrgFromPairwiseKey(pairwise_key, prg_idx, PrgLabel::kTruncShare);
+      out.trunc_data.r_share[idx] = prgFieldBounded(trunc_prg, bound_r);
+      out.trunc_data.r0_share[idx] = prgFieldBounded(trunc_prg, bound_r0);
+    }
+  } else if (id_ == helper_id_) {
+    std::vector<Field> helper_pack(5 * batch_size, Field(0));
+    for (size_t idx = 0; idx < batch_size; ++idx) {
+      const uint64_t prg_idx = idx_base + idx;
+      auto mul_helper_prg = makePrg(seed_, helper_id_, prg_idx, PrgLabel::kMulHelper);
+      const Field a = prgField(mul_helper_prg);
+      const Field b = prgField(mul_helper_prg);
+      const Field c = a * b;
+
+      Field sum_a = Field(0);
+      Field sum_b = Field(0);
+      Field sum_c = Field(0);
+      for (int i = 0; i <= nP_ - 2; ++i) {
+        auto share_prg =
+            makePrgFromPairwiseKey(key_manager_.keyForParty(i), prg_idx, PrgLabel::kMulShare);
+        sum_a += prgField(share_prg);
+        sum_b += prgField(share_prg);
+        sum_c += prgField(share_prg);
+      }
+      helper_pack[5 * idx] = a - sum_a;
+      helper_pack[5 * idx + 1] = b - sum_b;
+      helper_pack[5 * idx + 2] = c - sum_c;
+
+      auto trunc_helper_prg = makePrg(seed_, helper_id_, prg_idx, PrgLabel::kTruncHelper);
+      const Field r = prgFieldBounded(trunc_helper_prg, bound_r);
+      const Field r0 = prgFieldBounded(trunc_helper_prg, bound_r0);
+      Field sum_r = Field(0);
+      Field sum_r0 = Field(0);
+      for (int i = 0; i <= nP_ - 2; ++i) {
+        auto share_prg =
+            makePrgFromPairwiseKey(key_manager_.keyForParty(i), prg_idx, PrgLabel::kTruncShare);
+        sum_r += prgFieldBounded(share_prg, bound_r);
+        sum_r0 += prgFieldBounded(share_prg, bound_r0);
+      }
+      helper_pack[5 * idx + 3] = r - sum_r;
+      helper_pack[5 * idx + 4] = r0 - sum_r0;
+    }
+    network_->send(nP_ - 1, helper_pack.data(), helper_pack.size() * common::utils::FIELDSIZE);
+    network_->flush();
+  } else if (id_ == nP_ - 1) {
+    std::vector<Field> helper_pack(5 * batch_size, Field(0));
+    network_->recv(helper_id_, helper_pack.data(), helper_pack.size() * common::utils::FIELDSIZE);
+    for (size_t idx = 0; idx < batch_size; ++idx) {
+      out.mul_data.triples[idx] = {helper_pack[5 * idx], helper_pack[5 * idx + 1],
+                                   helper_pack[5 * idx + 2]};
+      out.trunc_data.r_share[idx] = helper_pack[5 * idx + 3];
+      out.trunc_data.r0_share[idx] = helper_pack[5 * idx + 4];
+    }
+  }
+
+  out.mul_data.ready = true;
+  out.trunc_data.ready = true;
+  out.ready = true;
+  return out;
+}
+
+FixedPointBatchMulResult Protocol::fixed_point_batch_mul_online_semi_honest(
+    const std::vector<Field>& x_shares, const std::vector<Field>& y_shares,
+    const FixedPointBatchMulOfflineData& offline_data) {
+  FixedPointBatchMulResult out;
+  if (config_.security_model != SecurityModel::kSemiHonest) {
+    throw std::runtime_error("fixed_point_batch_mul_online_semi_honest requires semi-honest mode");
+  }
+  if (!offline_data.ready) {
+    throw std::runtime_error(
+        "fixed_point_batch_mul_online_semi_honest requires ready offline data");
+  }
+  if (x_shares.size() != y_shares.size() ||
+      offline_data.mul_data.triples.size() != x_shares.size() ||
+      offline_data.trunc_data.r_share.size() != x_shares.size() ||
+      offline_data.trunc_data.r0_share.size() != x_shares.size()) {
+    throw std::runtime_error(
+        "fixed_point_batch_mul_online_semi_honest input/offline size mismatch");
+  }
+  if (id_ >= helper_id_ || x_shares.empty()) {
+    return out;
+  }
+
+  std::vector<Field> mul_open_batch;
+  mul_open_batch.reserve(2 * x_shares.size());
+  for (size_t i = 0; i < x_shares.size(); ++i) {
+    const auto& t = offline_data.mul_data.triples[i];
+    mul_open_batch.push_back(x_shares[i] - t.a);
+    mul_open_batch.push_back(y_shares[i] - t.b);
+  }
+  const auto opened = openVectorToComputingParties(mul_open_batch);
+  if (opened.size() != mul_open_batch.size()) {
+    throw std::runtime_error(
+        "fixed_point_batch_mul_online_semi_honest batched mul open failed");
+  }
+
+  const uint64_t two_pow_m = pow2Bound(offline_data.trunc_data.m);
+  const uint64_t two_pow_lx_minus_1 = pow2Bound(offline_data.trunc_data.ell_x - 1);
+  const Field two_pow_m_field = NTL::conv<Field>(NTL::to_ZZ(two_pow_m));
+  const Field shift_field = NTL::conv<Field>(NTL::to_ZZ(two_pow_lx_minus_1));
+  const Field lambda_m = inv(two_pow_m_field);
+
+  std::vector<Field> mul_outputs(x_shares.size(), Field(0));
+  std::vector<Field> trunc_open_batch(x_shares.size(), Field(0));
+  for (size_t i = 0; i < x_shares.size(); ++i) {
+    const auto& t = offline_data.mul_data.triples[i];
+    const Field d = opened[2 * i];
+    const Field e = opened[2 * i + 1];
+    Field out_share = e * t.a + d * t.b + t.c;
+    if (id_ == 0) {
+      out_share += d * e;
+    }
+    mul_outputs[i] = out_share;
+    const Field z_i = out_share + ((id_ == 0) ? shift_field : Field(0));
+    trunc_open_batch[i] =
+        z_i + two_pow_m_field * offline_data.trunc_data.r_share[i] + offline_data.trunc_data.r0_share[i];
+  }
+  const auto opened_trunc = openVectorToComputingParties(trunc_open_batch);
+  if (opened_trunc.size() != trunc_open_batch.size()) {
+    throw std::runtime_error(
+        "fixed_point_batch_mul_online_semi_honest batched trunc open failed");
+  }
+
+  out.shares.assign(x_shares.size(), Field(0));
+  for (size_t i = 0; i < x_shares.size(); ++i) {
+    const uint64_t c_u64 = NTL::conv<uint64_t>(NTL::rep(opened_trunc[i]));
+    const uint64_t c0 = c_u64 & (two_pow_m - 1);
+    const Field c0_field = NTL::conv<Field>(NTL::to_ZZ(c0));
+    const Field d_i = ((id_ == 0) ? c0_field : Field(0)) - offline_data.trunc_data.r0_share[i];
+    out.shares[i] = lambda_m * (mul_outputs[i] - d_i);
+  }
+  return out;
+}
+
+FixedPointBatchMulOfflineData Protocol::fixed_point_batch_mul_offline_malicious(
+    size_t batch_size, size_t ell_x, size_t m, size_t s) {
+  FixedPointBatchMulOfflineData out;
+  constexpr uint64_t kFixedPointIdxStride = 1ULL << 20;
+  const uint64_t idx_base = fixed_point_offline_counter_++ * kFixedPointIdxStride;
+  if (config_.security_model != SecurityModel::kMalicious) {
+    throw std::runtime_error("fixed_point_batch_mul_offline_malicious requires malicious mode");
+  }
+  if (id_ > helper_id_) {
+    return out;
+  }
+  if (m == 0 || m > ell_x) {
+    throw std::runtime_error("fixed_point_batch_mul_offline_malicious requires 0 < m <= ell_x");
+  }
+  if (ell_x + s + 1 >= 64) {
+    throw std::runtime_error(
+        "fixed_point_batch_mul_offline_malicious requires ell_x + s + 1 < 64");
+  }
+  if (!malicious_mac_setup_ready_) {
+    throw std::runtime_error(
+        "fixed_point_batch_mul_offline_malicious requires malicious MAC setup");
+  }
+
+  out.mul_data.triples.resize(batch_size);
+  out.mul_data.auth_tuples.resize(batch_size);
+  out.trunc_data.ell_x = ell_x;
+  out.trunc_data.m = m;
+  out.trunc_data.s = s;
+  out.trunc_data.r_share.assign(batch_size, Field(0));
+  out.trunc_data.r0_share.assign(batch_size, Field(0));
+  out.trunc_data.delta_r_share.assign(batch_size, Field(0));
+  out.trunc_data.delta_r0_share.assign(batch_size, Field(0));
+
+  const uint64_t bound_r = pow2Bound(ell_x - m + s);
+  const uint64_t bound_r0 = pow2Bound(m);
+
+  if (id_ <= nP_ - 2) {
+    const auto pairwise_key = key_manager_.keyWithHelper();
+    for (size_t idx = 0; idx < batch_size; ++idx) {
+      const uint64_t prg_idx = idx_base + idx;
+      auto mul_prg =
+          makePrgFromPairwiseKey(pairwise_key, prg_idx, PrgLabel::kMulMaliciousShare);
+      out.mul_data.triples[idx].a = prgField(mul_prg);
+      out.mul_data.triples[idx].b = prgField(mul_prg);
+      out.mul_data.triples[idx].c = prgField(mul_prg);
+      out.mul_data.auth_tuples[idx].a_prime = prgField(mul_prg);
+      out.mul_data.auth_tuples[idx].b_prime = prgField(mul_prg);
+      out.mul_data.auth_tuples[idx].c_prime = prgField(mul_prg);
+      out.mul_data.auth_tuples[idx].a_prime_b_prime = prgField(mul_prg);
+      out.mul_data.auth_tuples[idx].a_prime_c_prime = prgField(mul_prg);
+      out.mul_data.auth_tuples[idx].b_prime_c_prime = prgField(mul_prg);
+      out.mul_data.auth_tuples[idx].a_prime_b_prime_c_prime = prgField(mul_prg);
+
+      const auto trunc_share =
+          deriveOfflineMaskShare(pairwise_key, prg_idx, bound_r, bound_r0);
+      out.trunc_data.r_share[idx] = trunc_share[0];
+      out.trunc_data.r0_share[idx] = trunc_share[1];
+      out.trunc_data.delta_r_share[idx] = trunc_share[2];
+      out.trunc_data.delta_r0_share[idx] = trunc_share[3];
+    }
+    out.mul_data.delta_share = malicious_delta_share_;
+    out.mul_data.delta_inv_share = malicious_delta_inv_share_;
+    out.trunc_data.delta_share = malicious_delta_share_;
+  } else if (id_ == helper_id_) {
+    std::vector<Field> helper_pack(14 * batch_size, Field(0));
+    for (size_t idx = 0; idx < batch_size; ++idx) {
+      const uint64_t prg_idx = idx_base + idx;
+      auto mul_helper_prg = makePrg(seed_, helper_id_, prg_idx, PrgLabel::kMulMaliciousHelper);
+      const Field a = prgField(mul_helper_prg);
+      const Field b = prgField(mul_helper_prg);
+      const Field a_prime = prgField(mul_helper_prg);
+      const Field b_prime = prgField(mul_helper_prg);
+      const Field c_prime = prgField(mul_helper_prg);
+      const Field ab = a * b;
+      const Field a_prime_b_prime = a_prime * b_prime;
+      const Field a_prime_c_prime = a_prime * c_prime;
+      const Field b_prime_c_prime = b_prime * c_prime;
+      const Field a_prime_b_prime_c_prime = a_prime * b_prime * c_prime;
+
+      Field sum_a = Field(0);
+      Field sum_b = Field(0);
+      Field sum_ab = Field(0);
+      Field sum_a_prime = Field(0);
+      Field sum_b_prime = Field(0);
+      Field sum_c_prime = Field(0);
+      Field sum_a_prime_b_prime = Field(0);
+      Field sum_a_prime_c_prime = Field(0);
+      Field sum_b_prime_c_prime = Field(0);
+      Field sum_a_prime_b_prime_c_prime = Field(0);
+      for (int i = 0; i <= nP_ - 2; ++i) {
+        auto share_prg = makePrgFromPairwiseKey(key_manager_.keyForParty(i), prg_idx,
+                                                PrgLabel::kMulMaliciousShare);
+        sum_a += prgField(share_prg);
+        sum_b += prgField(share_prg);
+        sum_ab += prgField(share_prg);
+        sum_a_prime += prgField(share_prg);
+        sum_b_prime += prgField(share_prg);
+        sum_c_prime += prgField(share_prg);
+        sum_a_prime_b_prime += prgField(share_prg);
+        sum_a_prime_c_prime += prgField(share_prg);
+        sum_b_prime_c_prime += prgField(share_prg);
+        sum_a_prime_b_prime_c_prime += prgField(share_prg);
+      }
+      helper_pack[14 * idx] = a - sum_a;
+      helper_pack[14 * idx + 1] = b - sum_b;
+      helper_pack[14 * idx + 2] = ab - sum_ab;
+      helper_pack[14 * idx + 3] = a_prime - sum_a_prime;
+      helper_pack[14 * idx + 4] = b_prime - sum_b_prime;
+      helper_pack[14 * idx + 5] = c_prime - sum_c_prime;
+      helper_pack[14 * idx + 6] = a_prime_b_prime - sum_a_prime_b_prime;
+      helper_pack[14 * idx + 7] = a_prime_c_prime - sum_a_prime_c_prime;
+      helper_pack[14 * idx + 8] = b_prime_c_prime - sum_b_prime_c_prime;
+      helper_pack[14 * idx + 9] = a_prime_b_prime_c_prime - sum_a_prime_b_prime_c_prime;
+
+      auto trunc_helper_prg = makePrg(seed_, helper_id_, prg_idx, PrgLabel::kTruncHelper);
+      const Field r = prgFieldBounded(trunc_helper_prg, bound_r);
+      const Field r0 = prgFieldBounded(trunc_helper_prg, bound_r0);
+      const Field delta_r = helper_delta_ * r;
+      const Field delta_r0 = helper_delta_ * r0;
+      Field sum_r = Field(0);
+      Field sum_r0 = Field(0);
+      Field sum_delta_r = Field(0);
+      Field sum_delta_r0 = Field(0);
+      for (int i = 0; i <= nP_ - 2; ++i) {
+        const auto trunc_share =
+            deriveOfflineMaskShare(key_manager_.keyForParty(i), prg_idx, bound_r, bound_r0);
+        sum_r += trunc_share[0];
+        sum_r0 += trunc_share[1];
+        sum_delta_r += trunc_share[2];
+        sum_delta_r0 += trunc_share[3];
+      }
+      helper_pack[14 * idx + 10] = r - sum_r;
+      helper_pack[14 * idx + 11] = r0 - sum_r0;
+      helper_pack[14 * idx + 12] = delta_r - sum_delta_r;
+      helper_pack[14 * idx + 13] = delta_r0 - sum_delta_r0;
+    }
+    network_->send(nP_ - 1, helper_pack.data(), helper_pack.size() * common::utils::FIELDSIZE);
+    network_->flush();
+    out.mul_data.helper_delta = helper_delta_;
+    out.mul_data.helper_delta_inv = helper_delta_inv_;
+  } else if (id_ == nP_ - 1) {
+    std::vector<Field> helper_pack(14 * batch_size, Field(0));
+    network_->recv(helper_id_, helper_pack.data(), helper_pack.size() * common::utils::FIELDSIZE);
+    for (size_t idx = 0; idx < batch_size; ++idx) {
+      out.mul_data.triples[idx] = {helper_pack[14 * idx], helper_pack[14 * idx + 1],
+                                   helper_pack[14 * idx + 2]};
+      out.mul_data.auth_tuples[idx] = {
+          helper_pack[14 * idx + 3], helper_pack[14 * idx + 4], helper_pack[14 * idx + 5],
+          helper_pack[14 * idx + 6], helper_pack[14 * idx + 7], helper_pack[14 * idx + 8],
+          helper_pack[14 * idx + 9]};
+      out.trunc_data.r_share[idx] = helper_pack[14 * idx + 10];
+      out.trunc_data.r0_share[idx] = helper_pack[14 * idx + 11];
+      out.trunc_data.delta_r_share[idx] = helper_pack[14 * idx + 12];
+      out.trunc_data.delta_r0_share[idx] = helper_pack[14 * idx + 13];
+    }
+    out.mul_data.delta_share = malicious_delta_share_;
+    out.mul_data.delta_inv_share = malicious_delta_inv_share_;
+    out.trunc_data.delta_share = malicious_delta_share_;
+  }
+
+  out.mul_data.ready = true;
+  out.trunc_data.ready = true;
+  out.ready = true;
+  return out;
+}
+
+FixedPointBatchMulResult Protocol::fixed_point_batch_mul_online_malicious(
+    const std::vector<Field>& x_shares, const std::vector<Field>& delta_x_shares,
+    const std::vector<Field>& y_shares, const std::vector<Field>& delta_y_shares,
+    const FixedPointBatchMulOfflineData& offline_data) {
+  FixedPointBatchMulResult out;
+  if (config_.security_model != SecurityModel::kMalicious) {
+    throw std::runtime_error("fixed_point_batch_mul_online_malicious requires malicious mode");
+  }
+  if (!offline_data.ready) {
+    throw std::runtime_error(
+        "fixed_point_batch_mul_online_malicious requires ready offline data");
+  }
+  if (x_shares.size() != delta_x_shares.size() || x_shares.size() != y_shares.size() ||
+      x_shares.size() != delta_y_shares.size() ||
+      offline_data.mul_data.triples.size() != x_shares.size() ||
+      offline_data.mul_data.auth_tuples.size() != x_shares.size() ||
+      offline_data.trunc_data.r_share.size() != x_shares.size() ||
+      offline_data.trunc_data.r0_share.size() != x_shares.size() ||
+      offline_data.trunc_data.delta_r_share.size() != x_shares.size() ||
+      offline_data.trunc_data.delta_r0_share.size() != x_shares.size()) {
+    throw std::runtime_error(
+        "fixed_point_batch_mul_online_malicious input/offline size mismatch");
+  }
+  if (x_shares.empty()) {
+    return out;
+  }
+  verifyMaliciousKeyMaterial(offline_data.mul_data);
+
+  const uint64_t two_pow_m = pow2Bound(offline_data.trunc_data.m);
+  const uint64_t two_pow_lx_minus_1 = pow2Bound(offline_data.trunc_data.ell_x - 1);
+  const Field two_pow_m_field = NTL::conv<Field>(NTL::to_ZZ(two_pow_m));
+  const Field shift_field = NTL::conv<Field>(NTL::to_ZZ(two_pow_lx_minus_1));
+  const Field lambda_m = inv(two_pow_m_field);
+
+  if (id_ == helper_id_) {
+    std::vector<Field> sum_c_dc(x_shares.size(), Field(0));
+    for (int p = 0; p < helper_id_; ++p) {
+      std::vector<Field> recv(x_shares.size(), Field(0));
+      network_->recv(p, recv.data(), recv.size() * common::utils::FIELDSIZE);
+      for (size_t i = 0; i < recv.size(); ++i) {
+        sum_c_dc[i] += recv[i];
+      }
+    }
+    const uint8_t verdict =
+        std::all_of(sum_c_dc.begin(), sum_c_dc.end(), [](const Field& v) { return v == Field(0); })
+            ? 1
+            : 0;
+    for (int p = 0; p < helper_id_; ++p) {
+      network_->send(p, &verdict, sizeof(verdict));
+    }
+    network_->flush();
+    if (verdict == 0) {
+      throw std::runtime_error(
+          "fixed_point_batch_mul_online_malicious consistency check failed");
+    }
+    return out;
+  }
+
+  std::vector<Field> mul_open_batch;
+  mul_open_batch.reserve(5 * x_shares.size());
+  for (size_t i = 0; i < x_shares.size(); ++i) {
+    const auto& t = offline_data.mul_data.triples[i];
+    const auto& auth = offline_data.mul_data.auth_tuples[i];
+    mul_open_batch.push_back(x_shares[i] - t.a);
+    mul_open_batch.push_back(y_shares[i] - t.b);
+    mul_open_batch.push_back(delta_x_shares[i] - auth.a_prime);
+    mul_open_batch.push_back(delta_y_shares[i] - auth.b_prime);
+    mul_open_batch.push_back(offline_data.mul_data.delta_inv_share - auth.c_prime);
+  }
+  const auto opened = openVectorToComputingParties(mul_open_batch);
+  if (opened.size() != mul_open_batch.size()) {
+    throw std::runtime_error(
+        "fixed_point_batch_mul_online_malicious batched mul open failed");
+  }
+
+  std::vector<Field> mul_shares(x_shares.size(), Field(0));
+  std::vector<Field> mul_delta_shares(x_shares.size(), Field(0));
+  std::vector<Field> trunc_open_batch(x_shares.size(), Field(0));
+  std::vector<Field> trunc_delta_local(x_shares.size(), Field(0));
+  for (size_t i = 0; i < x_shares.size(); ++i) {
+    const auto& t = offline_data.mul_data.triples[i];
+    const auto& auth = offline_data.mul_data.auth_tuples[i];
+    const Field d = opened[5 * i];
+    const Field e = opened[5 * i + 1];
+    const Field d_delta = opened[5 * i + 2];
+    const Field e_delta = opened[5 * i + 3];
+    const Field f = opened[5 * i + 4];
+
+    mul_shares[i] = e * t.a + d * t.b + t.c;
+    if (id_ == 0) {
+      mul_shares[i] += d * e;
+    }
+    mul_delta_shares[i] =
+        auth.c_prime * d_delta * e_delta + auth.a_prime * e_delta * f +
+        auth.b_prime * d_delta * f + auth.a_prime_c_prime * e_delta +
+        auth.b_prime_c_prime * d_delta + auth.a_prime_b_prime * f +
+        auth.a_prime_b_prime_c_prime;
+    if (id_ == 0) {
+      mul_delta_shares[i] += d_delta * e_delta * f;
+    }
+
+    const Field z_i = mul_shares[i] + ((id_ == 0) ? shift_field : Field(0));
+    const Field delta_z_i =
+        mul_delta_shares[i] + offline_data.trunc_data.delta_share * shift_field;
+    trunc_open_batch[i] = z_i + two_pow_m_field * offline_data.trunc_data.r_share[i] +
+                          offline_data.trunc_data.r0_share[i];
+    trunc_delta_local[i] =
+        delta_z_i + two_pow_m_field * offline_data.trunc_data.delta_r_share[i] +
+        offline_data.trunc_data.delta_r0_share[i];
+  }
+
+  const auto opened_trunc = openVectorToComputingParties(trunc_open_batch);
+  if (opened_trunc.size() != trunc_open_batch.size()) {
+    throw std::runtime_error(
+        "fixed_point_batch_mul_online_malicious batched trunc open failed");
+  }
+
+  std::vector<Field> c_dc(x_shares.size(), Field(0));
+  for (size_t i = 0; i < x_shares.size(); ++i) {
+    c_dc[i] = offline_data.trunc_data.delta_share * opened_trunc[i] - trunc_delta_local[i];
+  }
+  network_->send(helper_id_, c_dc.data(), c_dc.size() * common::utils::FIELDSIZE);
+  network_->flush();
+
+  uint8_t verdict = 0;
+  network_->recv(helper_id_, &verdict, sizeof(verdict));
+  if (verdict == 0) {
+    throw std::runtime_error("fixed_point_batch_mul_online_malicious aborted by helper");
+  }
+
+  out.shares.assign(x_shares.size(), Field(0));
+  out.delta_shares.assign(x_shares.size(), Field(0));
+  for (size_t i = 0; i < x_shares.size(); ++i) {
+    const uint64_t c_u64 = NTL::conv<uint64_t>(NTL::rep(opened_trunc[i]));
+    const uint64_t c0 = c_u64 & (two_pow_m - 1);
+    const Field c0_field = NTL::conv<Field>(NTL::to_ZZ(c0));
+    const Field d_i = ((id_ == 0) ? c0_field : Field(0)) - offline_data.trunc_data.r0_share[i];
+    const Field delta_d_i =
+        offline_data.trunc_data.delta_share * c0_field - offline_data.trunc_data.delta_r0_share[i];
+    out.shares[i] = lambda_m * (mul_shares[i] - d_i);
+    out.delta_shares[i] = lambda_m * (mul_delta_shares[i] - delta_d_i);
+  }
+  return out;
+}
+
+FixedPointBatchMulOfflineData Protocol::fixed_point_batch_mul_offline(size_t batch_size,
+                                                                      size_t ell_x, size_t m,
+                                                                      size_t s) {
+  if (config_.security_model == SecurityModel::kMalicious) {
+    return fixed_point_batch_mul_offline_malicious(batch_size, ell_x, m, s);
+  }
+  return fixed_point_batch_mul_offline_semi_honest(batch_size, ell_x, m, s);
+}
+
+FixedPointBatchMulResult Protocol::fixed_point_batch_mul_online(
+    const std::vector<Field>& x_shares, const std::vector<Field>& y_shares,
+    const FixedPointBatchMulOfflineData& offline_data) {
+  return fixed_point_batch_mul_online_semi_honest(x_shares, y_shares, offline_data);
+}
+
+FixedPointBatchMulResult Protocol::fixed_point_batch_mul_online(
+    const std::vector<Field>& x_shares, const std::vector<Field>& delta_x_shares,
+    const std::vector<Field>& y_shares, const std::vector<Field>& delta_y_shares,
+    const FixedPointBatchMulOfflineData& offline_data) {
+  return fixed_point_batch_mul_online_malicious(
+      x_shares, delta_x_shares, y_shares, delta_y_shares, offline_data);
+}
+
+FixedPointMulOfflineData Protocol::fixed_point_mul_offline_semi_honest(size_t ell_x, size_t m,
+                                                                       size_t s) {
+  FixedPointMulOfflineData out;
+  constexpr uint64_t kFixedPointIdxStride = 1ULL << 20;
+  const uint64_t idx = fixed_point_offline_counter_++ * kFixedPointIdxStride;
+  if (config_.security_model != SecurityModel::kSemiHonest) {
+    throw std::runtime_error("fixed_point_mul_offline_semi_honest requires semi-honest mode");
+  }
+  if (id_ > helper_id_) {
+    return out;
+  }
+  if (m == 0 || m > ell_x) {
+    throw std::runtime_error("fixed_point_mul_offline_semi_honest requires 0 < m <= ell_x");
+  }
+  if (ell_x + s + 1 >= 64) {
+    throw std::runtime_error(
+        "fixed_point_mul_offline_semi_honest requires ell_x + s + 1 < 64");
+  }
+
+  out.ell_x = ell_x;
+  out.m = m;
+  out.s = s;
+  const uint64_t bound_r = pow2Bound(ell_x - m + s);
+  const uint64_t bound_r0 = pow2Bound(m);
+
+  if (id_ <= nP_ - 2) {
+    const auto pairwise_key = key_manager_.keyWithHelper();
+    auto mul_prg = makePrgFromPairwiseKey(pairwise_key, idx, PrgLabel::kMulShare);
+    out.triple.a = prgField(mul_prg);
+    out.triple.b = prgField(mul_prg);
+    out.triple.c = prgField(mul_prg);
+
+    auto trunc_prg = makePrgFromPairwiseKey(pairwise_key, idx, PrgLabel::kTruncShare);
+    out.r_share = prgFieldBounded(trunc_prg, bound_r);
+    out.r0_share = prgFieldBounded(trunc_prg, bound_r0);
+  } else if (id_ == helper_id_) {
+    auto mul_helper_prg = makePrg(seed_, helper_id_, idx, PrgLabel::kMulHelper);
+    const Field a = prgField(mul_helper_prg);
+    const Field b = prgField(mul_helper_prg);
+    const Field c = a * b;
+
+    Field sum_a = Field(0);
+    Field sum_b = Field(0);
+    Field sum_c = Field(0);
+    for (int i = 0; i <= nP_ - 2; ++i) {
+      auto share_prg =
+          makePrgFromPairwiseKey(key_manager_.keyForParty(i), idx, PrgLabel::kMulShare);
+      sum_a += prgField(share_prg);
+      sum_b += prgField(share_prg);
+      sum_c += prgField(share_prg);
+    }
+    auto trunc_helper_prg = makePrg(seed_, helper_id_, idx, PrgLabel::kTruncHelper);
+    const Field r = prgFieldBounded(trunc_helper_prg, bound_r);
+    const Field r0 = prgFieldBounded(trunc_helper_prg, bound_r0);
+    Field sum_r = Field(0);
+    Field sum_r0 = Field(0);
+    for (int i = 0; i <= nP_ - 2; ++i) {
+      auto share_prg =
+          makePrgFromPairwiseKey(key_manager_.keyForParty(i), idx, PrgLabel::kTruncShare);
+      sum_r += prgFieldBounded(share_prg, bound_r);
+      sum_r0 += prgFieldBounded(share_prg, bound_r0);
+    }
+    Field helper_pack[5] = {a - sum_a, b - sum_b, c - sum_c, r - sum_r, r0 - sum_r0};
+    network_->send(nP_ - 1, helper_pack, 5 * common::utils::FIELDSIZE);
+    network_->flush();
+  } else if (id_ == nP_ - 1) {
+    Field helper_pack[5];
+    network_->recv(helper_id_, helper_pack, 5 * common::utils::FIELDSIZE);
+    out.triple = {helper_pack[0], helper_pack[1], helper_pack[2]};
+    out.r_share = helper_pack[3];
+    out.r0_share = helper_pack[4];
+  }
+
+  out.ready = true;
+  return out;
+}
+
+FixedPointMulResult Protocol::fixed_point_mul_online_semi_honest(
+    const Field& x_share, const Field& y_share, const FixedPointMulOfflineData& offline_data) {
+  FixedPointMulResult out;
+  if (config_.security_model != SecurityModel::kSemiHonest) {
+    throw std::runtime_error("fixed_point_mul_online_semi_honest requires semi-honest mode");
+  }
+  if (!offline_data.ready) {
+    throw std::runtime_error("fixed_point_mul_online_semi_honest requires ready offline data");
+  }
+  if (id_ >= helper_id_) {
+    return out;
+  }
+
+  const auto opened = openVectorToComputingParties(
+      {x_share - offline_data.triple.a, y_share - offline_data.triple.b});
+  if (opened.size() != 2) {
+    throw std::runtime_error("fixed_point_mul_online_semi_honest mul open failed");
+  }
+  const Field d = opened[0];
+  const Field e = opened[1];
+  Field mul_share = e * offline_data.triple.a + d * offline_data.triple.b + offline_data.triple.c;
+  if (id_ == 0) {
+    mul_share += d * e;
+  }
+
+  const uint64_t two_pow_m = pow2Bound(offline_data.m);
+  const uint64_t two_pow_lx_minus_1 = pow2Bound(offline_data.ell_x - 1);
+  const Field two_pow_m_field = NTL::conv<Field>(NTL::to_ZZ(two_pow_m));
+  const Field shift_field = NTL::conv<Field>(NTL::to_ZZ(two_pow_lx_minus_1));
+  const Field lambda_m = inv(two_pow_m_field);
+
+  const Field z_i = mul_share + ((id_ == 0) ? shift_field : Field(0));
+  const Field c_i = z_i + two_pow_m_field * offline_data.r_share + offline_data.r0_share;
+  const Field c = openToComputingParties(c_i);
+  const uint64_t c_u64 = NTL::conv<uint64_t>(NTL::rep(c));
+  const uint64_t c0 = c_u64 & (two_pow_m - 1);
+  const Field c0_field = NTL::conv<Field>(NTL::to_ZZ(c0));
+  const Field d_i = ((id_ == 0) ? c0_field : Field(0)) - offline_data.r0_share;
+  out.share = lambda_m * (mul_share - d_i);
+  return out;
+}
+
+FixedPointMulOfflineData Protocol::fixed_point_mul_offline_malicious(size_t ell_x, size_t m,
+                                                                     size_t s) {
+  FixedPointMulOfflineData out;
+  constexpr uint64_t kFixedPointIdxStride = 1ULL << 20;
+  const uint64_t idx = fixed_point_offline_counter_++ * kFixedPointIdxStride;
+  if (config_.security_model != SecurityModel::kMalicious) {
+    throw std::runtime_error("fixed_point_mul_offline_malicious requires malicious mode");
+  }
+  if (id_ > helper_id_) {
+    return out;
+  }
+  if (m == 0 || m > ell_x) {
+    throw std::runtime_error("fixed_point_mul_offline_malicious requires 0 < m <= ell_x");
+  }
+  if (ell_x + s + 1 >= 64) {
+    throw std::runtime_error("fixed_point_mul_offline_malicious requires ell_x + s + 1 < 64");
+  }
+  if (!malicious_mac_setup_ready_) {
+    throw std::runtime_error("fixed_point_mul_offline_malicious requires malicious MAC setup");
+  }
+
+  out.ell_x = ell_x;
+  out.m = m;
+  out.s = s;
+  const uint64_t bound_r = pow2Bound(ell_x - m + s);
+  const uint64_t bound_r0 = pow2Bound(m);
+
+  if (id_ <= nP_ - 2) {
+    const auto pairwise_key = key_manager_.keyWithHelper();
+    auto mul_prg =
+        makePrgFromPairwiseKey(pairwise_key, idx, PrgLabel::kMulMaliciousShare);
+    out.triple.a = prgField(mul_prg);
+    out.triple.b = prgField(mul_prg);
+    out.triple.c = prgField(mul_prg);
+    out.auth_tuple.a_prime = prgField(mul_prg);
+    out.auth_tuple.b_prime = prgField(mul_prg);
+    out.auth_tuple.c_prime = prgField(mul_prg);
+    out.auth_tuple.a_prime_b_prime = prgField(mul_prg);
+    out.auth_tuple.a_prime_c_prime = prgField(mul_prg);
+    out.auth_tuple.b_prime_c_prime = prgField(mul_prg);
+    out.auth_tuple.a_prime_b_prime_c_prime = prgField(mul_prg);
+
+    const auto trunc_share = deriveOfflineMaskShare(pairwise_key, idx, bound_r, bound_r0);
+    out.r_share = trunc_share[0];
+    out.r0_share = trunc_share[1];
+    out.delta_r_share = trunc_share[2];
+    out.delta_r0_share = trunc_share[3];
+    out.delta_share = malicious_delta_share_;
+    out.delta_inv_share = malicious_delta_inv_share_;
+  } else if (id_ == helper_id_) {
+    auto mul_helper_prg = makePrg(seed_, helper_id_, idx, PrgLabel::kMulMaliciousHelper);
+    const Field a = prgField(mul_helper_prg);
+    const Field b = prgField(mul_helper_prg);
+    const Field a_prime = prgField(mul_helper_prg);
+    const Field b_prime = prgField(mul_helper_prg);
+    const Field c_prime = prgField(mul_helper_prg);
+    const Field ab = a * b;
+    const Field a_prime_b_prime = a_prime * b_prime;
+    const Field a_prime_c_prime = a_prime * c_prime;
+    const Field b_prime_c_prime = b_prime * c_prime;
+    const Field a_prime_b_prime_c_prime = a_prime * b_prime * c_prime;
+
+    Field sum_a = Field(0);
+    Field sum_b = Field(0);
+    Field sum_ab = Field(0);
+    Field sum_a_prime = Field(0);
+    Field sum_b_prime = Field(0);
+    Field sum_c_prime = Field(0);
+    Field sum_a_prime_b_prime = Field(0);
+    Field sum_a_prime_c_prime = Field(0);
+    Field sum_b_prime_c_prime = Field(0);
+    Field sum_a_prime_b_prime_c_prime = Field(0);
+    for (int i = 0; i <= nP_ - 2; ++i) {
+      auto share_prg =
+          makePrgFromPairwiseKey(key_manager_.keyForParty(i), idx, PrgLabel::kMulMaliciousShare);
+      sum_a += prgField(share_prg);
+      sum_b += prgField(share_prg);
+      sum_ab += prgField(share_prg);
+      sum_a_prime += prgField(share_prg);
+      sum_b_prime += prgField(share_prg);
+      sum_c_prime += prgField(share_prg);
+      sum_a_prime_b_prime += prgField(share_prg);
+      sum_a_prime_c_prime += prgField(share_prg);
+      sum_b_prime_c_prime += prgField(share_prg);
+      sum_a_prime_b_prime_c_prime += prgField(share_prg);
+    }
+    auto trunc_helper_prg = makePrg(seed_, helper_id_, idx, PrgLabel::kTruncHelper);
+    const Field r = prgFieldBounded(trunc_helper_prg, bound_r);
+    const Field r0 = prgFieldBounded(trunc_helper_prg, bound_r0);
+    const Field delta_r = helper_delta_ * r;
+    const Field delta_r0 = helper_delta_ * r0;
+    Field sum_r = Field(0);
+    Field sum_r0 = Field(0);
+    Field sum_delta_r = Field(0);
+    Field sum_delta_r0 = Field(0);
+    for (int i = 0; i <= nP_ - 2; ++i) {
+      const auto trunc_share =
+          deriveOfflineMaskShare(key_manager_.keyForParty(i), idx, bound_r, bound_r0);
+      sum_r += trunc_share[0];
+      sum_r0 += trunc_share[1];
+      sum_delta_r += trunc_share[2];
+      sum_delta_r0 += trunc_share[3];
+    }
+    Field helper_pack[14] = {
+        a - sum_a,
+        b - sum_b,
+        ab - sum_ab,
+        a_prime - sum_a_prime,
+        b_prime - sum_b_prime,
+        c_prime - sum_c_prime,
+        a_prime_b_prime - sum_a_prime_b_prime,
+        a_prime_c_prime - sum_a_prime_c_prime,
+        b_prime_c_prime - sum_b_prime_c_prime,
+        a_prime_b_prime_c_prime - sum_a_prime_b_prime_c_prime,
+        r - sum_r,
+        r0 - sum_r0,
+        delta_r - sum_delta_r,
+        delta_r0 - sum_delta_r0};
+    network_->send(nP_ - 1, helper_pack, 14 * common::utils::FIELDSIZE);
+    network_->flush();
+    out.helper_delta = helper_delta_;
+    out.helper_delta_inv = helper_delta_inv_;
+  } else if (id_ == nP_ - 1) {
+    Field helper_pack[14];
+    network_->recv(helper_id_, helper_pack, 14 * common::utils::FIELDSIZE);
+    out.triple = {helper_pack[0], helper_pack[1], helper_pack[2]};
+    out.auth_tuple = {helper_pack[3], helper_pack[4], helper_pack[5], helper_pack[6],
+                      helper_pack[7], helper_pack[8], helper_pack[9]};
+    out.r_share = helper_pack[10];
+    out.r0_share = helper_pack[11];
+    out.delta_r_share = helper_pack[12];
+    out.delta_r0_share = helper_pack[13];
+    out.delta_share = malicious_delta_share_;
+    out.delta_inv_share = malicious_delta_inv_share_;
+  }
+
+  out.ready = true;
+  return out;
+}
+
+FixedPointMulResult Protocol::fixed_point_mul_online_malicious(
+    const Field& x_share, const Field& delta_x_share, const Field& y_share,
+    const Field& delta_y_share, const FixedPointMulOfflineData& offline_data) {
+  FixedPointMulResult out;
+  if (config_.security_model != SecurityModel::kMalicious) {
+    throw std::runtime_error("fixed_point_mul_online_malicious requires malicious mode");
+  }
+  if (!offline_data.ready) {
+    throw std::runtime_error("fixed_point_mul_online_malicious requires ready offline data");
+  }
+  if (id_ == helper_id_) {
+    Field sum_c_dc = Field(0);
+    for (int p = 0; p < helper_id_; ++p) {
+      Field recv = Field(0);
+      network_->recv(p, &recv, common::utils::FIELDSIZE);
+      sum_c_dc += recv;
+    }
+    const uint8_t verdict = (sum_c_dc == Field(0)) ? 1 : 0;
+    for (int p = 0; p < helper_id_; ++p) {
+      network_->send(p, &verdict, sizeof(verdict));
+    }
+    network_->flush();
+    if (verdict == 0) {
+      throw std::runtime_error("fixed_point_mul_online_malicious consistency check failed");
+    }
+    return out;
+  }
+
+  verifyMaliciousKeyMaterial(MulOfflineData{{offline_data.triple}, {offline_data.auth_tuple},
+                                            offline_data.delta_share, offline_data.delta_inv_share,
+                                            offline_data.helper_delta,
+                                            offline_data.helper_delta_inv, true});
+
+  const auto opened = openVectorToComputingParties(
+      {x_share - offline_data.triple.a, y_share - offline_data.triple.b,
+       delta_x_share - offline_data.auth_tuple.a_prime,
+       delta_y_share - offline_data.auth_tuple.b_prime,
+       offline_data.delta_inv_share - offline_data.auth_tuple.c_prime});
+  if (opened.size() != 5) {
+    throw std::runtime_error("fixed_point_mul_online_malicious mul open failed");
+  }
+
+  const Field d = opened[0];
+  const Field e = opened[1];
+  const Field d_delta = opened[2];
+  const Field e_delta = opened[3];
+  const Field f = opened[4];
+
+  Field mul_share = e * offline_data.triple.a + d * offline_data.triple.b + offline_data.triple.c;
+  if (id_ == 0) {
+    mul_share += d * e;
+  }
+  Field mul_delta_share =
+      offline_data.auth_tuple.c_prime * d_delta * e_delta +
+      offline_data.auth_tuple.a_prime * e_delta * f +
+      offline_data.auth_tuple.b_prime * d_delta * f +
+      offline_data.auth_tuple.a_prime_c_prime * e_delta +
+      offline_data.auth_tuple.b_prime_c_prime * d_delta +
+      offline_data.auth_tuple.a_prime_b_prime * f +
+      offline_data.auth_tuple.a_prime_b_prime_c_prime;
+  if (id_ == 0) {
+    mul_delta_share += d_delta * e_delta * f;
+  }
+
+  const uint64_t two_pow_m = pow2Bound(offline_data.m);
+  const uint64_t two_pow_lx_minus_1 = pow2Bound(offline_data.ell_x - 1);
+  const Field two_pow_m_field = NTL::conv<Field>(NTL::to_ZZ(two_pow_m));
+  const Field shift_field = NTL::conv<Field>(NTL::to_ZZ(two_pow_lx_minus_1));
+  const Field lambda_m = inv(two_pow_m_field);
+
+  const Field z_i = mul_share + ((id_ == 0) ? shift_field : Field(0));
+  const Field delta_z_i = mul_delta_share + offline_data.delta_share * shift_field;
+  const Field c_i = z_i + two_pow_m_field * offline_data.r_share + offline_data.r0_share;
+  const Field delta_c_i =
+      delta_z_i + two_pow_m_field * offline_data.delta_r_share + offline_data.delta_r0_share;
+  const Field c = openToComputingParties(c_i);
+  const Field c_dc = offline_data.delta_share * c - delta_c_i;
+  network_->send(helper_id_, &c_dc, common::utils::FIELDSIZE);
+  network_->flush();
+
+  uint8_t verdict = 0;
+  network_->recv(helper_id_, &verdict, sizeof(verdict));
+  if (verdict == 0) {
+    throw std::runtime_error("fixed_point_mul_online_malicious aborted by helper");
+  }
+
+  const uint64_t c_u64 = NTL::conv<uint64_t>(NTL::rep(c));
+  const uint64_t c0 = c_u64 & (two_pow_m - 1);
+  const Field c0_field = NTL::conv<Field>(NTL::to_ZZ(c0));
+  const Field d_i = ((id_ == 0) ? c0_field : Field(0)) - offline_data.r0_share;
+  const Field delta_d_i = offline_data.delta_share * c0_field - offline_data.delta_r0_share;
+  out.share = lambda_m * (mul_share - d_i);
+  out.delta_share = lambda_m * (mul_delta_share - delta_d_i);
+  return out;
+}
+
+FixedPointMulOfflineData Protocol::fixed_point_mul_offline(size_t ell_x, size_t m, size_t s) {
+  if (config_.security_model == SecurityModel::kMalicious) {
+    return fixed_point_mul_offline_malicious(ell_x, m, s);
+  }
+  return fixed_point_mul_offline_semi_honest(ell_x, m, s);
+}
+
+FixedPointMulResult Protocol::fixed_point_mul_online(
+    const Field& x_share, const Field& y_share, const FixedPointMulOfflineData& offline_data) {
+  return fixed_point_mul_online_semi_honest(x_share, y_share, offline_data);
+}
+
+FixedPointMulResult Protocol::fixed_point_mul_online(
+    const Field& x_share, const Field& delta_x_share, const Field& y_share,
+    const Field& delta_y_share, const FixedPointMulOfflineData& offline_data) {
+  return fixed_point_mul_online_malicious(x_share, delta_x_share, y_share, delta_y_share,
+                                          offline_data);
 }
 
 CompareOfflineData Protocol::compare_offline_internal(size_t lx, size_t s, bool force_t,
