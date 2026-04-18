@@ -118,7 +118,7 @@ for port in range(base, base + width):
 PY
 }
 
-localhost_pid_has_listener_in_range() {
+localhost_pid_has_socket_in_range() {
   local child_pid="$1"
   local start_port="$2"
   local end_port="$3"
@@ -132,17 +132,29 @@ start_port = int(sys.argv[2])
 end_port = int(sys.argv[3])
 
 try:
-    output = subprocess.check_output(["ss", "-H", "-ltnp"], text=True, stderr=subprocess.DEVNULL)
+    # NetIO closes the listening socket immediately after accept(), so a pure
+    # LISTEN poll can miss progress between 100 ms sampling windows. Inspect
+    # every TCP socket owned by the child instead.
+    output = subprocess.check_output(["ss", "-H", "-tanp"], text=True, stderr=subprocess.DEVNULL)
 except subprocess.CalledProcessError:
     raise SystemExit(1)
+
+def extract_port(token):
+    for pattern in (r"\]:(\d+)$", r":(\d+)$"):
+        match = re.search(pattern, token)
+        if match:
+            return int(match.group(1))
+    return None
 
 for line in output.splitlines():
     if f"pid={pid}," not in line and f"pid={pid})" not in line:
         continue
-    match = re.search(r":(\d+)\s", line)
-    if not match:
+    parts = line.split()
+    if len(parts) < 4:
         continue
-    port = int(match.group(1))
+    port = extract_port(parts[3])
+    if port is None:
+        continue
     if start_port <= port <= end_port:
         raise SystemExit(0)
 
@@ -182,7 +194,7 @@ localhost_wait_for_bind() {
       echo "[READY] party=${party_id}, pid=${child_pid}, marker=${marker}"
       return 0
     fi
-    if localhost_pid_has_listener_in_range "${child_pid}" "${start_port}" "${end_port}"; then
+    if localhost_pid_has_socket_in_range "${child_pid}" "${start_port}" "${end_port}"; then
       printf 'pid=%s\nport_range=%s-%s\n' "${child_pid}" "${start_port}" "${end_port}" > "${ready_file}"
       echo "[READY] party=${party_id}, pid=${child_pid}, ports=${start_port}-${end_port}"
       return 0
@@ -190,7 +202,7 @@ localhost_wait_for_bind() {
     sleep 0.1
   done
 
-  echo "[ERROR] party ${party_id} did not expose a listening socket in ${start_port}-${end_port} within ${timeout_s}s" >&2
+  echo "[ERROR] party ${party_id} did not expose any TCP socket in ${start_port}-${end_port} within ${timeout_s}s" >&2
   if [[ -f "${log_file}" ]]; then
     echo "[ERROR] Last log lines from ${log_file}:" >&2
     tail -n 20 "${log_file}" >&2 || true
