@@ -77,19 +77,21 @@ sudo ./scripts/run_comparison_paper_grid.sh --out-dir run_logs/test_cmp_paper
 
 ### Table III: fixed-point multiplication
 
-- Script: `scripts/compare_fixedpoint_mul_a2.sh`
+- Script: `scripts/run_fixedpoint_mul_tc.sh` (paper delay cases) or `scripts/compare_fixedpoint_mul_a2.sh` (single condition)
 - Minimal command:
 
 ```sh
-./scripts/compare_fixedpoint_mul_a2.sh -o run_logs/test_fixedpoint_paper
+sudo bash ./scripts/run_fixedpoint_mul_tc.sh --out-dir run_logs/test_fixedpoint_paper
 ```
 
 - Output directory: `run_logs/test_fixedpoint_paper/`
 - Key output files:
-  - `run_logs/test_fixedpoint_paper/semi-honest/p*.json`
-  - `run_logs/test_fixedpoint_paper/malicious/p*.json`
-- Notes: the script defaults now match the paper's Asterisk 2.0 rows, namely `n=5` and 1,000 consecutive fixed-point multiplications. Per-party execution logs are written under `run_logs/test_fixedpoint_paper/*/logs/`.
-- Operational detail: the script reserves one full port block up front and splits it between the semi-honest and malicious runs.
+  - `run_logs/test_fixedpoint_paper/fixedmul_owd_20ms_n5/compare_output.txt`
+  - `run_logs/test_fixedpoint_paper/fixedmul_owd_20ms_n5/raw/semi-honest/p*.json`
+  - `run_logs/test_fixedpoint_paper/fixedmul_owd_50ms_n5/compare_output.txt`
+  - `run_logs/test_fixedpoint_paper/fixedmul_owd_50ms_n5/raw/malicious/p*.json`
+- Notes: this command runs both paper latency cases for the fixed-point benchmark, namely `100mbit`, one-way delay `20ms` and `50ms`, `n=5`, and 1,000 consecutive fixed-point multiplications per case. Per-party execution logs are written under each case directory's `raw/*/logs/` subdirectory.
+- Operational detail: `run_fixedpoint_mul_tc.sh` configures `tc` on `lo` for each delay case in sequence, records the network snapshot, and launches the semi-honest and malicious sub-runs through `compare_fixedpoint_mul_a2.sh`.
 
 ### Section: probabilistic truncation
 

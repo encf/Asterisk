@@ -77,19 +77,21 @@ sudo ./scripts/run_comparison_paper_grid.sh --out-dir run_logs/test_cmp_paper
 
 ### 表 III：定点数乘法
 
-- 脚本：`scripts/compare_fixedpoint_mul_a2.sh`
+- 脚本：`scripts/run_fixedpoint_mul_tc.sh`（论文 delay case）或 `scripts/compare_fixedpoint_mul_a2.sh`（单一条件）
 - 最短命令：
 
 ```sh
-./scripts/compare_fixedpoint_mul_a2.sh -o run_logs/test_fixedpoint_paper
+sudo bash ./scripts/run_fixedpoint_mul_tc.sh --out-dir run_logs/test_fixedpoint_paper
 ```
 
 - 输出目录：`run_logs/test_fixedpoint_paper/`
 - 关键输出文件：
-  - `run_logs/test_fixedpoint_paper/semi-honest/p*.json`
-  - `run_logs/test_fixedpoint_paper/malicious/p*.json`
-- 说明：该脚本默认参数现在已经和论文中的 Asterisk 2.0 行一致，即 `n=5`、1,000 次连续定点数乘法。每个参与方的执行日志会写到 `run_logs/test_fixedpoint_paper/*/logs/` 下。
-- 运行机制：脚本会先一次性预留完整端口区间，然后分别分配给 semi-honest 和 malicious 两段运行。
+  - `run_logs/test_fixedpoint_paper/fixedmul_owd_20ms_n5/compare_output.txt`
+  - `run_logs/test_fixedpoint_paper/fixedmul_owd_20ms_n5/raw/semi-honest/p*.json`
+  - `run_logs/test_fixedpoint_paper/fixedmul_owd_50ms_n5/compare_output.txt`
+  - `run_logs/test_fixedpoint_paper/fixedmul_owd_50ms_n5/raw/malicious/p*.json`
+- 说明：该命令会把定点数乘法的两个论文时延 case 都跑掉，也就是 `100mbit`、单向时延 `20ms` 和 `50ms`、`n=5`，且每个 case 都执行 1,000 次连续定点数乘法。每个参与方的执行日志会写到各 case 目录下的 `raw/*/logs/` 子目录。
+- 运行机制：`run_fixedpoint_mul_tc.sh` 会按顺序在 `lo` 上配置每个时延 case 的 `tc`，保存网络快照，再通过 `compare_fixedpoint_mul_a2.sh` 拉起 semi-honest 和 malicious 两段子实验。
 
 ### 小节：概率截断
 
